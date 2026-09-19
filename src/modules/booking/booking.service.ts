@@ -196,6 +196,9 @@ export class BookingService {
 
           let paymentId: string | undefined;
           let doctorId: string | undefined;
+          // Only an attempt that actually won the row lock in validate_hold owns
+          // the slot, and only that attempt may release it while compensating.
+          let ownsHold = false;
 
           try {
             // ---- Step 1: validate + lock the hold -----------------------
@@ -249,6 +252,7 @@ export class BookingService {
             );
 
             doctorId = held.doctor_id;
+            ownsHold = true;
             await this.saga.completeStep(sagaId, 'validate_hold');
 
             const doctorRes = await this.db.query<{ consultation_fee: string; currency: string }>(
@@ -378,7 +382,14 @@ export class BookingService {
               bookingRef,
             };
           } catch (error) {
-            await this.compensate(sagaId, error, { paymentId, slotId: dto.slotId, doctorId, bookingRef });
+            await this.compensate(sagaId, error, {
+              paymentId,
+              slotId: dto.slotId,
+              doctorId,
+              bookingRef,
+              holdToken: dto.holdToken,
+              ownsHold,
+            });
             this.classifyConflict(error, 'confirm');
             throw error;
           }
@@ -393,7 +404,15 @@ export class BookingService {
   private async compensate(
     sagaId: string,
     error: unknown,
-    ctx: { paymentId?: string; slotId: string; doctorId?: string; bookingRef: string },
+    ctx: {
+      paymentId?: string;
+      slotId: string;
+      doctorId?: string;
+      bookingRef: string;
+      holdToken?: string;
+      /** True only when this attempt won the hold; see the release below. */
+      ownsHold?: boolean;
+    },
   ): Promise<void> {
     const steps = await this.saga.compensationsFor(sagaId);
     await this.saga.fail(sagaId, (error as Error).message ?? 'unknown error');
@@ -434,16 +453,23 @@ export class BookingService {
       }
     }
 
-    // Always return the slot to the pool if it is still held by this attempt.
-    await this.db
-      .query(
-        `UPDATE availability_slots
-            SET status='available', hold_token=NULL, held_by=NULL, held_until=NULL,
-                version = version + 1
-          WHERE id = $1 AND status = 'held'`,
-        [ctx.slotId],
-      )
-      .catch(() => undefined);
+    // Return the slot to the pool — but only when this attempt actually owned
+    // the hold. In a concurrent confirm race the losers fail at validate_hold
+    // without ever acquiring the row lock; if they released the slot anyway
+    // they would undo the work of the request that legitimately won, and every
+    // attempt would end up failing. The hold_token predicate is a second guard
+    // for the case where the winner has already moved the slot on.
+    if (ctx.ownsHold && ctx.holdToken) {
+      await this.db
+        .query(
+          `UPDATE availability_slots
+              SET status='available', hold_token=NULL, held_by=NULL, held_until=NULL,
+                  version = version + 1
+            WHERE id = $1 AND status = 'held' AND hold_token = $2`,
+          [ctx.slotId, ctx.holdToken],
+        )
+        .catch(() => undefined);
+    }
 
     if (ctx.doctorId) await this.availability.invalidateSlotCache(ctx.doctorId);
   }
