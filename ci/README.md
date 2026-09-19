@@ -21,13 +21,21 @@ one `git mv` by a human to become active.
 ## Activating it
 
 ```bash
-mkdir -p .github/workflows
-git mv ci/github-actions-ci.yml .github/workflows/ci.yml
+./ci/activate.sh
 git commit -m "ci: activate GitHub Actions pipeline"
 git push
 ```
 
-No edits are required — the file is unmodified and path-independent.
+The script moves the file, fixes the paragraph in the README that points at
+the parked location, and is safe to re-run (it no-ops if the workflow is
+already active). Or do it by hand:
+
+```bash
+mkdir -p .github/workflows
+git mv ci/github-actions-ci.yml .github/workflows/ci.yml
+```
+
+No edits to the workflow are required — it is unmodified and path-independent.
 
 ## What it runs
 

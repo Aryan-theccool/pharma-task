@@ -214,8 +214,8 @@ scripts/              migrate, seed, key generation/rotation, demo, OpenAPI gene
 The pipeline is **[`ci/github-actions-ci.yml`](ci/github-actions-ci.yml)**. It is
 parked outside `.github/workflows/` because the bot account that pushed this
 branch lacks GitHub's `workflows` permission and the push is rejected
-otherwise; one `git mv` activates it, see [ci/README.md](ci/README.md). It
-runs:
+otherwise. Run **`./ci/activate.sh`** to move it into place — see
+[ci/README.md](ci/README.md). It runs:
 
 `static-analysis` (format, lint with zero warnings, typecheck) · `unit-tests` ·
 `integration-tests` (real PG 16 + Redis 7 service containers, migrations,
