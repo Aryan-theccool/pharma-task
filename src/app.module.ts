@@ -27,6 +27,7 @@ import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 import { MfaGuard } from './common/guards/mfa.guard';
 import { RateLimitGuard } from './common/guards/rate-limit.guard';
+import { CacheControlInterceptor } from './common/interceptors/cache-control.interceptor';
 import { MetricsInterceptor } from './common/interceptors/metrics.interceptor';
 import { AuditInterceptor } from './common/interceptors/audit.interceptor';
 import { RequestContextMiddleware } from './common/middleware/request-context.middleware';
@@ -115,6 +116,8 @@ import { currentTraceIds } from './observability/tracing';
     { provide: APP_GUARD, useClass: RolesGuard },
     { provide: APP_GUARD, useClass: MfaGuard },
 
+    // Runs first so it can set the default before a handler streams a response.
+    { provide: APP_INTERCEPTOR, useClass: CacheControlInterceptor },
     { provide: APP_INTERCEPTOR, useClass: MetricsInterceptor },
     { provide: APP_INTERCEPTOR, useClass: AuditInterceptor },
     { provide: APP_INTERCEPTOR, useClass: IdempotencyInterceptor },

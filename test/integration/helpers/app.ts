@@ -71,6 +71,8 @@ export interface TestUser {
   token: string;
   refreshToken: string;
   totpSecret?: string;
+  /** The TOTP code consumed during fixture setup — never reusable. */
+  spentTotp?: string;
 }
 
 /** Register a user and return an authenticated session. */
@@ -114,9 +116,12 @@ export async function createUser(
       .send({ code: authenticator.generate(user.totpSecret!) })
       .expect(200);
 
+    const stepUpCode = authenticator.generate(user.totpSecret!);
+    user.spentTotp = stepUpCode;
+
     const steppedUp = await request(server)
       .post('/api/v1/auth/login')
-      .send({ email, password: PASSWORD, totp: authenticator.generate(user.totpSecret!) })
+      .send({ email, password: PASSWORD, totp: stepUpCode })
       .expect(200);
 
     user.token = steppedUp.body.accessToken;
@@ -206,3 +211,22 @@ export async function bookSlot(
 }
 
 export const totp = (secret: string) => authenticator.generate(secret);
+
+/**
+ * Wait until the current 30-second TOTP step rolls over, then return a code.
+ *
+ * The application deliberately refuses to accept the same TOTP code twice
+ * (replay protection), so a test that has already spent a code inside the
+ * current window must wait for a genuinely new one rather than regenerating
+ * the identical digits.
+ */
+export async function freshTotp(secret: string, previous?: string): Promise<string> {
+  const spent = previous ?? authenticator.generate(secret);
+  const deadline = Date.now() + 35_000;
+  for (;;) {
+    const candidate = authenticator.generate(secret);
+    if (candidate !== spent) return candidate;
+    if (Date.now() > deadline) throw new Error('TOTP step did not advance within 35s');
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+  }
+}

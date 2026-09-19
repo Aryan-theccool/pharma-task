@@ -70,11 +70,14 @@ describe('FieldEncryptionService', () => {
   });
 
   it('produces a stable, case-insensitive blind index for emails', () => {
+    // The index is a keyed digest, so compare by value rather than identity.
     const a = svc.emailHash('Asha.Patel@Example.com');
     const b = svc.emailHash('asha.patel@example.com');
-    expect(a).toBe(b);
-    expect(a).not.toBe(svc.emailHash('someone.else@example.com'));
-    // The index must not be reversible to the address.
-    expect(a).not.toContain('asha');
+    const other = svc.emailHash('someone.else@example.com');
+
+    expect(Buffer.from(a).toString('hex')).toBe(Buffer.from(b).toString('hex'));
+    expect(Buffer.from(a).toString('hex')).not.toBe(Buffer.from(other).toString('hex'));
+    // It must not be reversible to, or contain, the address.
+    expect(Buffer.from(a).toString('utf8')).not.toContain('asha');
   });
 });

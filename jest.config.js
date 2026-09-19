@@ -14,12 +14,14 @@ const base = {
   rootDir: '.',
   moduleFileExtensions: ['ts', 'js', 'json'],
   transform: {
-    '^.+\\.ts$': ['ts-jest', { tsconfig: '<rootDir>/tsconfig.json', isolatedModules: true }],
+    '^.+\\.ts$': ['ts-jest', { tsconfig: '<rootDir>/tsconfig.json' }],
   },
   clearMocks: true,
 };
 
 module.exports = {
+  // Integration specs wait on real TOTP windows and async PDF rendering.
+  testTimeout: 60_000,
   projects: [
     {
       ...base,
@@ -32,7 +34,6 @@ module.exports = {
       testMatch: ['<rootDir>/test/integration/**/*.spec.ts'],
       globalSetup: '<rootDir>/test/integration/global-setup.ts',
       setupFiles: ['<rootDir>/test/integration/setup-env.ts'],
-      testTimeout: 60_000,
     },
   ],
   collectCoverageFrom: [
