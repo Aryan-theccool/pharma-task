@@ -32,6 +32,8 @@ Drizzle ORM · OpenTelemetry · Prometheus · Docker · Terraform (AWS)
 | **[Load test report](load/README.md)** | Methodology, measured numbers, what the booking scenario proves |
 | **[Infrastructure](infra/terraform/README.md)** | Terraform layout, AWS design decisions, bootstrap, cost sketch |
 | **[ADRs](docs/adr/)** | Nine decision records — why each significant choice was made |
+| **[Idempotency contract](docs/IDEMPOTENCY.md)** | The client-facing retry contract, with guidance for callers |
+| **[Runbook](docs/RUNBOOK.md)** | One procedure per alert, linked from the alert annotations |
 | **[OpenAPI](docs/openapi.json)** | Generated spec; also served at `/docs` in development |
 
 ---
