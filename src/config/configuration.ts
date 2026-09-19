@@ -34,6 +34,13 @@ export const envSchema = z.object({
 
   RATE_LIMIT_GLOBAL_PER_MIN: z.coerce.number().int().positive().default(300),
   RATE_LIMIT_AUTH_PER_MIN: z.coerce.number().int().positive().default(10),
+  /**
+   * Multiplier applied to every per-route @RateLimit budget. Exists so load
+   * tests can measure the application rather than the throttle without editing
+   * decorators, and so a single env var can loosen limits during an incident.
+   * Must stay at 1 in production; CI asserts the default.
+   */
+  RATE_LIMIT_ROUTE_MULTIPLIER: z.coerce.number().positive().default(1),
 
   CORS_ORIGINS: z.string().default('*'),
   SWAGGER_ENABLED: z

@@ -25,6 +25,7 @@ import type { AuthenticatedRequest } from '../types/authenticated-request';
 @Injectable()
 export class RateLimitGuard implements CanActivate {
   private readonly globalLimit: number;
+  private readonly routeMultiplier: number;
 
   constructor(
     private readonly reflector: Reflector,
@@ -32,6 +33,7 @@ export class RateLimitGuard implements CanActivate {
     config: ConfigService,
   ) {
     this.globalLimit = config.get<number>('RATE_LIMIT_GLOBAL_PER_MIN', 300);
+    this.routeMultiplier = config.get<number>('RATE_LIMIT_ROUTE_MULTIPLIER', 1);
   }
 
   async canActivate(ctx: ExecutionContext): Promise<boolean> {
@@ -60,12 +62,13 @@ export class RateLimitGuard implements CanActivate {
         const scopeId = routeOptions.scope === 'ip' ? (req.ip ?? 'unknown') : identity;
         const bucket = `rl:route:${routePath}:${scopeId}`;
         const routeWindow = await this.redis.incrementWindow(bucket, routeOptions.windowSeconds);
+        const limit = Math.ceil(routeOptions.limit * this.routeMultiplier);
 
-        res.setHeader('RateLimit-Limit', routeOptions.limit);
-        res.setHeader('RateLimit-Remaining', Math.max(0, routeOptions.limit - routeWindow.count));
+        res.setHeader('RateLimit-Limit', limit);
+        res.setHeader('RateLimit-Remaining', Math.max(0, limit - routeWindow.count));
         res.setHeader('RateLimit-Reset', routeWindow.ttl);
 
-        if (routeWindow.count > routeOptions.limit) {
+        if (routeWindow.count > limit) {
           this.reject(res, routeWindow.ttl, routePath);
         }
       } else {
