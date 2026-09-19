@@ -87,7 +87,11 @@ export class SchedulerService {
   @Cron(CronExpression.EVERY_HOUR)
   async refreshAnalytics(): Promise<void> {
     if (!this.enabled) return;
-    await this.queues.analytics.add('refresh', {}, { jobId: `analytics-${new Date().toISOString().slice(0, 13)}` });
+    await this.queues.analytics.add(
+      'refresh',
+      {},
+      { jobId: `analytics-${new Date().toISOString().slice(0, 13)}` },
+    );
   }
 
   /** Create next months' partitions ahead of time (daily at 02:00). */

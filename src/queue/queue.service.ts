@@ -40,11 +40,9 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
 
   async onModuleDestroy(): Promise<void> {
     if (this.depthTimer) clearInterval(this.depthTimer);
-    await Promise.all([
-      this.notifications.close(),
-      this.pdf.close(),
-      this.analytics.close(),
-    ]).catch(() => undefined);
+    await Promise.all([this.notifications.close(), this.pdf.close(), this.analytics.close()]).catch(
+      () => undefined,
+    );
     await this.connection.quit().catch(() => undefined);
   }
 

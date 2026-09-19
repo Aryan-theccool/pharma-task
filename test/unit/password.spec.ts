@@ -51,9 +51,7 @@ describe('PasswordService', () => {
 
     it('rejects passwords containing well-known breached words', () => {
       for (const weak of ['MyPassword123!', 'Qwerty!12345678', 'Amrutam!2024ab']) {
-        expect(PasswordService.validateStrength(weak)).toContain(
-          'must not contain a common breached word',
-        );
+        expect(PasswordService.validateStrength(weak)).toContain('must not contain a common breached word');
       }
     });
 

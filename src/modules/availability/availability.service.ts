@@ -113,9 +113,7 @@ export class AvailabilityService {
         if (dow !== rule.day_of_week) continue;
 
         const validFrom = DateTime.fromJSDate(rule.valid_from, { zone }).startOf('day');
-        const validTo = rule.valid_to
-          ? DateTime.fromJSDate(rule.valid_to, { zone }).endOf('day')
-          : null;
+        const validTo = rule.valid_to ? DateTime.fromJSDate(rule.valid_to, { zone }).endOf('day') : null;
         if (day < validFrom.startOf('day')) continue;
         if (validTo && day > validTo) continue;
 

@@ -1,9 +1,4 @@
-import {
-  ConflictException,
-  ForbiddenException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { DatabaseService } from '../../infra/database.service';
 import { FieldEncryptionService } from '../../common/crypto/field-encryption.service';
 import { AuditService } from '../audit/audit.service';

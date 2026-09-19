@@ -4,13 +4,7 @@ import {
 } from '../../src/modules/consultations/consultations.service';
 import type { ConsultationStatus } from '../../src/modules/consultations/consultations.service';
 
-const ALL: ConsultationStatus[] = [
-  'scheduled',
-  'in_progress',
-  'completed',
-  'cancelled',
-  'no_show',
-];
+const ALL: ConsultationStatus[] = ['scheduled', 'in_progress', 'completed', 'cancelled', 'no_show'];
 
 describe('consultation state machine', () => {
   it('allows only the clinically meaningful transitions', () => {

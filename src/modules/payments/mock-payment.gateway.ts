@@ -1,11 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
-import {
-  AuthorizeRequest,
-  PaymentGateway,
-  PaymentResult,
-} from './payment-gateway.interface';
+import { AuthorizeRequest, PaymentGateway, PaymentResult } from './payment-gateway.interface';
 import { CircuitBreaker } from '../../common/resilience/circuit-breaker';
 import { isTransientError, retry, withTimeout } from '../../common/resilience/retry';
 
@@ -132,9 +128,7 @@ export class MockPaymentGateway implements PaymentGateway {
    * Constant-time comparison; the caller additionally rejects stale timestamps.
    */
   verifyWebhookSignature(rawBody: string, signature: string, timestamp: string): boolean {
-    const expected = createHmac('sha256', this.webhookSecret)
-      .update(`${timestamp}.${rawBody}`)
-      .digest('hex');
+    const expected = createHmac('sha256', this.webhookSecret).update(`${timestamp}.${rawBody}`).digest('hex');
     const provided = Buffer.from(signature, 'utf8');
     const computed = Buffer.from(expected, 'utf8');
     return provided.length === computed.length && timingSafeEqual(provided, computed);

@@ -12,9 +12,7 @@ export interface IdempotencyRecord {
   response_body: unknown;
 }
 
-export type ClaimResult =
-  | { claimed: true }
-  | { claimed: false; existing: IdempotencyRecord };
+export type ClaimResult = { claimed: true } | { claimed: false; existing: IdempotencyRecord };
 
 /**
  * Durable idempotency store.
@@ -44,7 +42,9 @@ export class IdempotencyService {
    * JSON serialiser emitted the object keys in a different order.
    */
   static fingerprint(payload: unknown): string {
-    return createHash('sha256').update(canonicalJson(payload ?? {})).digest('hex');
+    return createHash('sha256')
+      .update(canonicalJson(payload ?? {}))
+      .digest('hex');
   }
 
   /** Scope keys per user + endpoint so one tenant cannot squat another's key. */

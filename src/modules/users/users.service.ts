@@ -123,8 +123,11 @@ export class UsersService {
           WHERE user_id = $1`,
         [userId],
       );
-      await client.query(`UPDATE refresh_tokens SET revoked_at = now(), revoked_reason = 'erasure'
-                           WHERE user_id = $1 AND revoked_at IS NULL`, [userId]);
+      await client.query(
+        `UPDATE refresh_tokens SET revoked_at = now(), revoked_reason = 'erasure'
+                           WHERE user_id = $1 AND revoked_at IS NULL`,
+        [userId],
+      );
     });
 
     await this.audit.record({

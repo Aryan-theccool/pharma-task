@@ -97,10 +97,7 @@ export class AuthService {
           ],
         );
         const id = res.rows[0].id;
-        await client.query(`INSERT INTO profiles (user_id, full_name) VALUES ($1, $2)`, [
-          id,
-          input.fullName,
-        ]);
+        await client.query(`INSERT INTO profiles (user_id, full_name) VALUES ($1, $2)`, [id, input.fullName]);
         return id;
       });
 
@@ -197,9 +194,7 @@ export class AuthService {
       this.logger.warn(`privileged user ${user.id} logged in without MFA enrolled`);
     }
 
-    await this.db.query(`UPDATE users SET failed_logins = 0, locked_until = NULL WHERE id = $1`, [
-      user.id,
-    ]);
+    await this.db.query(`UPDATE users SET failed_logins = 0, locked_until = NULL WHERE id = $1`, [user.id]);
 
     const tokens = await this.issueTokens(user.id, user.role, user.mfa_enabled, amr, ctx);
     metrics.authEvents.inc({ event: 'login', result: 'success' });
@@ -372,7 +367,12 @@ export class AuthService {
       }
     }
     metrics.authEvents.inc({ event: 'logout', result: 'success' });
-    await this.audit.record({ actorId: userId, action: 'auth.logout', resourceType: 'user', resourceId: userId });
+    await this.audit.record({
+      actorId: userId,
+      action: 'auth.logout',
+      resourceType: 'user',
+      resourceId: userId,
+    });
   }
 
   private async revokeFamily(familyId: string, reason: string): Promise<void> {
@@ -431,7 +431,11 @@ export class AuthService {
     }
 
     const recoveryCodes = Array.from({ length: 10 }, () =>
-      randomBytes(5).toString('hex').toUpperCase().match(/.{1,5}/g)!.join('-'),
+      randomBytes(5)
+        .toString('hex')
+        .toUpperCase()
+        .match(/.{1,5}/g)!
+        .join('-'),
     );
 
     await this.db.transaction(async (client) => {
@@ -478,10 +482,9 @@ export class AuthService {
       });
     }
     await this.db.transaction(async (client) => {
-      await client.query(
-        `UPDATE users SET mfa_enabled = false, mfa_secret_enc = NULL WHERE id = $1`,
-        [userId],
-      );
+      await client.query(`UPDATE users SET mfa_enabled = false, mfa_secret_enc = NULL WHERE id = $1`, [
+        userId,
+      ]);
       await client.query(`DELETE FROM mfa_recovery_codes WHERE user_id = $1`, [userId]);
     });
     await this.audit.record({

@@ -10,7 +10,11 @@ import { PAYMENT_GATEWAY } from './payment-gateway.interface';
  */
 @Module({
   controllers: [PaymentsController],
-  providers: [PaymentsService, MockPaymentGateway, { provide: PAYMENT_GATEWAY, useClass: MockPaymentGateway }],
+  providers: [
+    PaymentsService,
+    MockPaymentGateway,
+    { provide: PAYMENT_GATEWAY, useClass: MockPaymentGateway },
+  ],
   exports: [PaymentsService, PAYMENT_GATEWAY],
 })
 export class PaymentsModule {}

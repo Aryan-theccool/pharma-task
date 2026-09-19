@@ -80,8 +80,7 @@ export class IdempotencyInterceptor implements NestInterceptor {
             metrics.idempotencyEvents.inc({ outcome: 'conflict' });
             throw new ConflictException({
               title: 'Idempotency-Key reuse with a different payload',
-              detail:
-                'This Idempotency-Key was already used for a different request body. Use a new key.',
+              detail: 'This Idempotency-Key was already used for a different request body. Use a new key.',
             });
           }
 

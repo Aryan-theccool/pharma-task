@@ -29,7 +29,9 @@ async function main(): Promise<void> {
     )`);
 
   const dir = join(__dirname, '..', 'db', 'migrations');
-  const files = readdirSync(dir).filter((f) => f.endsWith('.sql')).sort();
+  const files = readdirSync(dir)
+    .filter((f) => f.endsWith('.sql'))
+    .sort();
 
   for (const file of files) {
     const applied = await client.query('SELECT 1 FROM schema_migrations WHERE name = $1', [file]);

@@ -213,7 +213,10 @@ export class DoctorsService {
     const rows = res.rows.slice(0, limit);
     const nextCursor =
       res.rows.length > limit
-        ? encodeCursor({ rating: String(rows[rows.length - 1].rating_avg), id: String(rows[rows.length - 1].id) })
+        ? encodeCursor({
+            rating: String(rows[rows.length - 1].rating_avg),
+            id: String(rows[rows.length - 1].id),
+          })
         : null;
 
     const facets = await this.facets(query);

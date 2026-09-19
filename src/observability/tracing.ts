@@ -14,10 +14,16 @@ export function initTracing(): { shutdown: () => Promise<void> } {
     return { shutdown: async () => undefined };
   }
 
+  // Loaded lazily with require(): the OpenTelemetry auto-instrumentations must
+  // patch core modules *before* anything else imports them, and pulling ~40
+  // packages into the module graph when tracing is disabled would slow every
+  // boot (and every test run) for no benefit.
+  /* eslint-disable @typescript-eslint/no-require-imports */
   const { NodeSDK } = require('@opentelemetry/sdk-node');
   const { OTLPTraceExporter } = require('@opentelemetry/exporter-trace-otlp-http');
   const { getNodeAutoInstrumentations } = require('@opentelemetry/auto-instrumentations-node');
   const { resourceFromAttributes } = require('@opentelemetry/resources');
+  /* eslint-enable @typescript-eslint/no-require-imports */
 
   const endpoint = process.env.OTEL_EXPORTER_OTLP_ENDPOINT ?? 'http://localhost:4318';
 

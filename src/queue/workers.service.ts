@@ -118,10 +118,9 @@ export class WorkersService implements OnModuleInit, OnModuleDestroy {
     const recipients = new Set<string>();
     if (typeof payload.patientId === 'string') recipients.add(payload.patientId);
     if (typeof payload.doctorId === 'string') {
-      const owner = await this.db.query<{ user_id: string }>(
-        `SELECT user_id FROM doctors WHERE id = $1`,
-        [payload.doctorId],
-      );
+      const owner = await this.db.query<{ user_id: string }>(`SELECT user_id FROM doctors WHERE id = $1`, [
+        payload.doctorId,
+      ]);
       if (owner.rows[0]) recipients.add(owner.rows[0].user_id);
     }
 
@@ -166,7 +165,13 @@ export class WorkersService implements OnModuleInit, OnModuleDestroy {
     signature: string | null;
     diagnosis: string | null;
     advice: string | null;
-    items: Array<{ drug: string; dosage: string; frequency: string; duration: string; instructions?: string }>;
+    items: Array<{
+      drug: string;
+      dosage: string;
+      frequency: string;
+      duration: string;
+      instructions?: string;
+    }>;
   }): Promise<Buffer> {
     return new Promise((resolvePdf, reject) => {
       const doc = new PDFDocument({ size: 'A4', margin: 50 });

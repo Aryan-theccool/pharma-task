@@ -281,69 +281,66 @@ export class BookingService {
             });
 
             // ---- Step 3: create consultation + mark slot booked ---------
-            const consultation = await withSpan(
-              'saga.step.create_consultation',
-              { 'saga.id': sagaId },
-              () =>
-                this.db.transaction(async (client) => {
-                  // Defence 2 again, now in the writing transaction.
-                  const slotRes = await client.query<{ status: string; hold_token: string | null }>(
-                    `SELECT status, hold_token FROM availability_slots WHERE id = $1 FOR UPDATE NOWAIT`,
-                    [dto.slotId],
-                  );
-                  const current = slotRes.rows[0];
-                  if (!current || current.status !== 'held' || current.hold_token !== dto.holdToken) {
-                    metrics.bookingConflicts.inc({ defence: 'row_lock' });
-                    throw new ConflictException({ title: 'Hold is no longer valid' });
-                  }
+            const consultation = await withSpan('saga.step.create_consultation', { 'saga.id': sagaId }, () =>
+              this.db.transaction(async (client) => {
+                // Defence 2 again, now in the writing transaction.
+                const slotRes = await client.query<{ status: string; hold_token: string | null }>(
+                  `SELECT status, hold_token FROM availability_slots WHERE id = $1 FOR UPDATE NOWAIT`,
+                  [dto.slotId],
+                );
+                const current = slotRes.rows[0];
+                if (!current || current.status !== 'held' || current.hold_token !== dto.holdToken) {
+                  metrics.bookingConflicts.inc({ defence: 'row_lock' });
+                  throw new ConflictException({ title: 'Hold is no longer valid' });
+                }
 
-                  const created = await client.query<{ id: string; scheduled_at: Date }>(
-                    `INSERT INTO consultations
+                const created = await client.query<{ id: string; scheduled_at: Date }>(
+                  `INSERT INTO consultations
                        (patient_id, doctor_id, slot_id, status, mode, scheduled_at, ends_at,
                         chief_complaint, amount)
                      VALUES ($1,$2,$3,'scheduled',$4,$5,$6,$7,$8)
                      RETURNING id, scheduled_at`,
-                    [
-                      user.sub,
-                      held.doctor_id,
-                      dto.slotId,
-                      dto.mode ?? 'video',
-                      held.starts_at,
-                      held.ends_at,
-                      dto.chiefComplaint ?? null,
-                      amount,
-                    ],
-                  );
+                  [
+                    user.sub,
+                    held.doctor_id,
+                    dto.slotId,
+                    dto.mode ?? 'video',
+                    held.starts_at,
+                    held.ends_at,
+                    dto.chiefComplaint ?? null,
+                    amount,
+                  ],
+                );
 
-                  await client.query(
-                    `UPDATE availability_slots
+                await client.query(
+                  `UPDATE availability_slots
                         SET status='booked', held_until=NULL, version = version + 1, updated_at = now()
                       WHERE id = $1`,
-                    [dto.slotId],
-                  );
+                  [dto.slotId],
+                );
 
-                  await client.query(
-                    `UPDATE payments SET consultation_id = $2, updated_at = now() WHERE id = $1`,
-                    [payment.id, created.rows[0].id],
-                  );
+                await client.query(
+                  `UPDATE payments SET consultation_id = $2, updated_at = now() WHERE id = $1`,
+                  [payment.id, created.rows[0].id],
+                );
 
-                  // Same transaction as the state change — no dual write.
-                  await this.outbox.emit(client, {
-                    aggregateType: 'consultation',
-                    aggregateId: created.rows[0].id,
-                    eventType: 'consultation.booked',
-                    payload: {
-                      consultationId: created.rows[0].id,
-                      patientId: user.sub,
-                      doctorId: held.doctor_id,
-                      scheduledAt: held.starts_at.toISOString(),
-                      amount,
-                      currency,
-                    },
-                  });
+                // Same transaction as the state change — no dual write.
+                await this.outbox.emit(client, {
+                  aggregateType: 'consultation',
+                  aggregateId: created.rows[0].id,
+                  eventType: 'consultation.booked',
+                  payload: {
+                    consultationId: created.rows[0].id,
+                    patientId: user.sub,
+                    doctorId: held.doctor_id,
+                    scheduledAt: held.starts_at.toISOString(),
+                    amount,
+                    currency,
+                  },
+                });
 
-                  return created.rows[0];
-                }),
+                return created.rows[0];
+              }),
             );
             await this.saga.completeStep(sagaId, 'create_consultation', {
               consultationId: consultation.id,
@@ -449,7 +446,10 @@ export class BookingService {
         }
         await this.saga.recordCompensation(sagaId, step);
       } catch (compError) {
-        this.logger.error({ err: compError, sagaId, step }, 'compensation failed — requires operator attention');
+        this.logger.error(
+          { err: compError, sagaId, step },
+          'compensation failed — requires operator attention',
+        );
       }
     }
 
@@ -606,9 +606,10 @@ export class BookingService {
             doctor_id: string;
             slot_id: string;
             status: string;
-          }>(`SELECT id, patient_id, doctor_id, slot_id, status FROM consultations WHERE id = $1 FOR UPDATE`, [
-            consultationId,
-          ]);
+          }>(
+            `SELECT id, patient_id, doctor_id, slot_id, status FROM consultations WHERE id = $1 FOR UPDATE`,
+            [consultationId],
+          );
           const consultation = res.rows[0];
           if (!consultation) throw new NotFoundException({ title: 'Consultation not found' });
           if (consultation.patient_id !== user.sub && user.role !== 'admin') {

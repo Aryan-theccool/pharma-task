@@ -44,14 +44,57 @@ function hashPassword(password: string): string {
 }
 
 const SPECIALIZATIONS = [
-  'ayurveda', 'dermatology', 'general-medicine', 'gynaecology', 'pediatrics',
-  'cardiology', 'nutrition', 'psychiatry', 'orthopaedics', 'endocrinology',
+  'ayurveda',
+  'dermatology',
+  'general-medicine',
+  'gynaecology',
+  'pediatrics',
+  'cardiology',
+  'nutrition',
+  'psychiatry',
+  'orthopaedics',
+  'endocrinology',
 ];
 const LANGUAGES = ['en', 'hi', 'ta', 'te', 'mr', 'bn', 'gu', 'kn'];
-const FIRST = ['Meera', 'Arjun', 'Kavya', 'Rohan', 'Ananya', 'Vikram', 'Divya', 'Nikhil', 'Priya', 'Sanjay',
-  'Ishita', 'Rahul', 'Neha', 'Aditya', 'Sneha', 'Karthik', 'Pooja', 'Manish', 'Riya', 'Amit'];
-const LAST = ['Iyer', 'Sharma', 'Reddy', 'Patel', 'Nair', 'Gupta', 'Desai', 'Rao', 'Joshi', 'Menon',
-  'Kulkarni', 'Verma', 'Bose', 'Chopra', 'Pillai'];
+const FIRST = [
+  'Meera',
+  'Arjun',
+  'Kavya',
+  'Rohan',
+  'Ananya',
+  'Vikram',
+  'Divya',
+  'Nikhil',
+  'Priya',
+  'Sanjay',
+  'Ishita',
+  'Rahul',
+  'Neha',
+  'Aditya',
+  'Sneha',
+  'Karthik',
+  'Pooja',
+  'Manish',
+  'Riya',
+  'Amit',
+];
+const LAST = [
+  'Iyer',
+  'Sharma',
+  'Reddy',
+  'Patel',
+  'Nair',
+  'Gupta',
+  'Desai',
+  'Rao',
+  'Joshi',
+  'Menon',
+  'Kulkarni',
+  'Verma',
+  'Bose',
+  'Chopra',
+  'Pillai',
+];
 
 // Deterministic PRNG so repeated seeds produce the same demo data.
 let seedState = 42;
@@ -112,10 +155,7 @@ async function main(): Promise<void> {
         passwordHash,
       ],
     );
-    await client.query(`INSERT INTO profiles (user_id, full_name) VALUES ($1,$2)`, [
-      user.rows[0].id,
-      name,
-    ]);
+    await client.query(`INSERT INTO profiles (user_id, full_name) VALUES ($1,$2)`, [user.rows[0].id, name]);
 
     const doctor = await client.query<{ id: string }>(
       `INSERT INTO doctors
@@ -154,15 +194,15 @@ async function main(): Promise<void> {
         passwordHash,
       ],
     );
-    await client.query(
-      `INSERT INTO profiles (user_id, full_name, dob_enc, gender) VALUES ($1,$2,$3,$4)`,
-      [
-        user.rows[0].id,
-        `${pick(FIRST)} ${pick(LAST)}`,
-        encrypt(key, `19${60 + Math.floor(rnd() * 40)}-0${1 + Math.floor(rnd() * 9)}-1${Math.floor(rnd() * 9)}`),
-        pick(['female', 'male', 'other']),
-      ],
-    );
+    await client.query(`INSERT INTO profiles (user_id, full_name, dob_enc, gender) VALUES ($1,$2,$3,$4)`, [
+      user.rows[0].id,
+      `${pick(FIRST)} ${pick(LAST)}`,
+      encrypt(
+        key,
+        `19${60 + Math.floor(rnd() * 40)}-0${1 + Math.floor(rnd() * 9)}-1${Math.floor(rnd() * 9)}`,
+      ),
+      pick(['female', 'male', 'other']),
+    ]);
     patientIds.push(user.rows[0].id);
   }
   console.log(`· ${patientIds.length} patients`);
@@ -218,7 +258,9 @@ async function main(): Promise<void> {
     const doctorId = pick(doctorIds);
     const patientId = pick(patientIds);
     const daysAgo = 1 + Math.floor(rnd() * 25);
-    const when = DateTime.utc().minus({ days: daysAgo }).set({ hour: 10 + Math.floor(rnd() * 6), minute: 0 });
+    const when = DateTime.utc()
+      .minus({ days: daysAgo })
+      .set({ hour: 10 + Math.floor(rnd() * 6), minute: 0 });
 
     const slot = await client.query<{ id: string }>(
       `INSERT INTO availability_slots (doctor_id, slot_range, status)
@@ -237,7 +279,15 @@ async function main(): Promise<void> {
          (patient_id, doctor_id, slot_id, status, scheduled_at, ends_at, started_at, ended_at, amount)
        VALUES ($1,$2,$3,$4,$5,$6,$5,$6,$7)
        RETURNING id`,
-      [patientId, doctorId, slot.rows[0].id, status, when.toISO(), when.plus({ minutes: 30 }).toISO(), amount],
+      [
+        patientId,
+        doctorId,
+        slot.rows[0].id,
+        status,
+        when.toISO(),
+        when.plus({ minutes: 30 }).toISO(),
+        amount,
+      ],
     );
 
     if (status === 'completed') {

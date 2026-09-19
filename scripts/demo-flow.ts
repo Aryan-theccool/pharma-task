@@ -37,6 +37,21 @@ const bad = (s: string) => {
 };
 const info = (s: string) => console.log(`      \x1b[2m${s}\x1b[0m`);
 
+interface DoctorSummary {
+  id: string;
+  displayName: string;
+  consultationFee: number;
+}
+
+interface Facet {
+  value: string;
+  count: number;
+}
+
+// The demo script intentionally treats API responses as loosely-typed JSON: it
+// asserts on the live wire format rather than importing server-side DTOs, so a
+// silent change to a response shape shows up here as a failed assertion.
+/* eslint-disable @typescript-eslint/no-explicit-any */
 interface Res<T = any> {
   status: number;
   body: T;
@@ -81,8 +96,22 @@ async function clearRateLimits(): Promise<void> {
   await redis.quit();
 }
 
-const expect = (label: string, actual: number, want: number) =>
-  actual === want ? ok(`${label} → ${actual}`) : bad(`${label} → expected ${want}, got ${actual}`);
+function expect(label: string, actual: number, want: number): void {
+  if (actual === want) {
+    ok(`${label} → ${actual}`);
+  } else {
+    bad(`${label} → expected ${want}, got ${actual}`);
+  }
+}
+
+/** Assert a boolean condition, reporting `whenTrue` or `whenFalse`. */
+function check(condition: boolean, whenTrue: string, whenFalse: string): void {
+  if (condition) {
+    ok(whenTrue);
+  } else {
+    bad(whenFalse);
+  }
+}
 
 /** Register an account, enrol TOTP and return a fully step-up-authenticated session. */
 async function provision(role: 'patient' | 'doctor', label: string) {
@@ -90,7 +119,8 @@ async function provision(role: 'patient' | 'doctor', label: string) {
   const reg = await call('POST', '/auth/register', {
     body: { email, password: PASSWORD, fullName: `Demo ${label} ${RUN}`, role },
   });
-  if (reg.status !== 201) throw new Error(`register ${label} failed: ${reg.status} ${JSON.stringify(reg.body)}`);
+  if (reg.status !== 201)
+    throw new Error(`register ${label} failed: ${reg.status} ${JSON.stringify(reg.body)}`);
 
   const login = await call('POST', '/auth/login', { body: { email, password: PASSWORD } });
   let token = login.body.accessToken as string;
@@ -128,9 +158,11 @@ async function main(): Promise<void> {
 
   expect(
     'weak password rejected by policy',
-    (await call('POST', '/auth/register', {
-      body: { email: `weak-${RUN}@amrutam.test`, password: 'password1234', fullName: 'Weak Pass' },
-    })).status,
+    (
+      await call('POST', '/auth/register', {
+        body: { email: `weak-${RUN}@amrutam.test`, password: 'password1234', fullName: 'Weak Pass' },
+      })
+    ).status,
     400,
   );
   expect(
@@ -202,44 +234,61 @@ async function main(): Promise<void> {
     token: doctor.token,
     body: { from: today.toISOString().slice(0, 10), days: 14 },
   });
-  rerun.body.created === 0
-    ? ok('re-running materialisation is idempotent (0 duplicates)')
-    : bad(`expected 0 new slots on re-run, got ${rerun.body.created}`);
+  check(
+    rerun.body.created === 0,
+    're-running materialisation is idempotent (0 duplicates)',
+    `expected 0 new slots on re-run, got ${rerun.body.created}`,
+  );
 
   // ------------------------------------------------------------- 3. search
   bold('3 · Doctor search (full-text + trigram + facets, Redis cache-aside)');
   const search = await call('GET', '/doctors/search?limit=3&minRating=3');
-  search.body.items?.length
-    ? ok(`${search.body.items.length} results; top = ${search.body.items[0].displayName}`)
-    : bad('search returned no doctors');
+  check(
+    search.body.items?.length,
+    `${search.body.items.length} results; top = ${search.body.items[0].displayName}`,
+    'search returned no doctors',
+  );
   info(
     `facets: ${search.body.facets.specializations
       .slice(0, 4)
-      .map((f: any) => `${f.value}(${f.count})`)
+      .map((f: Facet) => `${f.value}(${f.count})`)
       .join(', ')}`,
   );
-  ok(`filter by specialization → ${(await call('GET', '/doctors/search?specialization=ayurveda&limit=5')).body.items.length} results`);
+  ok(
+    `filter by specialization → ${(await call('GET', '/doctors/search?specialization=ayurveda&limit=5')).body.items.length} results`,
+  );
   const fullText = await call('GET', '/doctors/search?q=integrative%20chronic%20care&limit=5');
-  fullText.body.items.length > 0
-    ? ok(`full-text query matched ${fullText.body.items.length} doctors`)
-    : bad('full-text search returned nothing');
+  check(
+    fullText.body.items.length > 0,
+    `full-text query matched ${fullText.body.items.length} doctors`,
+    'full-text search returned nothing',
+  );
   const feeFiltered = await call('GET', '/doctors/search?minFee=500&maxFee=900&limit=50');
-  feeFiltered.body.items.every((d: any) => d.consultationFee >= 500 && d.consultationFee <= 900)
-    ? ok(`fee range filter honoured across ${feeFiltered.body.items.length} results`)
-    : bad('fee filter leaked out-of-range doctors');
+  check(
+    feeFiltered.body.items.every((d: DoctorSummary) => d.consultationFee >= 500 && d.consultationFee <= 900),
+    `fee range filter honoured across ${feeFiltered.body.items.length} results`,
+    'fee filter leaked out-of-range doctors',
+  );
 
   // The doctor we just onboarded is still `pending` verification, so the public
   // directory must not surface them — verification is a publishing gate.
   const mine = await call('GET', `/doctors/search?q=${encodeURIComponent(`Demo ${RUN}`)}&limit=5`);
-  mine.body.items.some((d: any) => d.id === doctorId)
-    ? bad('unverified doctor leaked into public search results')
-    : ok('unverified doctor correctly withheld from public search');
+  check(
+    !mine.body.items.some((d: DoctorSummary) => d.id === doctorId),
+    'unverified doctor correctly withheld from public search',
+    'unverified doctor leaked into public search results',
+  );
 
   const page1 = await call('GET', '/doctors/search?limit=2');
-  const page2 = await call('GET', `/doctors/search?limit=2&cursor=${encodeURIComponent(page1.body.nextCursor)}`);
-  page1.body.items[0].id !== page2.body.items[0].id
-    ? ok('keyset pagination returns a distinct second page')
-    : bad('pagination returned the same page twice');
+  const page2 = await call(
+    'GET',
+    `/doctors/search?limit=2&cursor=${encodeURIComponent(page1.body.nextCursor)}`,
+  );
+  check(
+    page1.body.items[0].id !== page2.body.items[0].id,
+    'keyset pagination returns a distinct second page',
+    'pagination returned the same page twice',
+  );
 
   // -------------------------------------------------------- 4. availability
   bold('4 · Slot listing');
@@ -247,7 +296,7 @@ async function main(): Promise<void> {
   const to = new Date(Date.now() + 14 * 86_400_000).toISOString();
   const slots = await call('GET', `/doctors/${doctorId}/slots?from=${from}&to=${to}&status=available`);
   const slot = slots.body[0];
-  slot ? ok(`${slots.body.length} free slots; picked ${slot.startsAt}`) : bad('no free slots produced');
+  check(slot, `${slots.body.length} free slots; picked ${slot.startsAt}`, 'no free slots produced');
 
   // ------------------------------------------------------------ 5. booking
   bold('5 · Booking saga: hold → authorize → consultation → capture');
@@ -260,7 +309,11 @@ async function main(): Promise<void> {
   info(`holdToken ${String(hold.body.holdToken).slice(0, 8)}… expires ${hold.body.expiresAt}`);
 
   const confirmKey = randomUUID();
-  const confirmBody = { slotId: slot.id, holdToken: hold.body.holdToken, chiefComplaint: 'Persistent acidity' };
+  const confirmBody = {
+    slotId: slot.id,
+    holdToken: hold.body.holdToken,
+    chiefComplaint: 'Persistent acidity',
+  };
   const confirm = await call('POST', '/bookings/confirm', {
     token: patientToken,
     idempotencyKey: confirmKey,
@@ -277,12 +330,16 @@ async function main(): Promise<void> {
     idempotencyKey: confirmKey,
     body: confirmBody,
   });
-  replay.body.consultationId === consultationId
-    ? ok('same key + same payload → original response replayed, no second booking')
-    : bad('replay produced a different result');
-  replay.headers.get('idempotent-replay') === 'true'
-    ? ok('replay flagged via `Idempotent-Replay: true`')
-    : bad('missing Idempotent-Replay header');
+  check(
+    replay.body.consultationId === consultationId,
+    'same key + same payload → original response replayed, no second booking',
+    'replay produced a different result',
+  );
+  check(
+    replay.headers.get('idempotent-replay') === 'true',
+    'replay flagged via `Idempotent-Replay: true`',
+    'missing Idempotent-Replay header',
+  );
 
   // Key order must not affect the fingerprint (canonical JSON).
   const reordered = await call('POST', '/bookings/confirm', {
@@ -290,17 +347,21 @@ async function main(): Promise<void> {
     idempotencyKey: confirmKey,
     body: { chiefComplaint: 'Persistent acidity', holdToken: hold.body.holdToken, slotId: slot.id },
   });
-  reordered.status === 200 || reordered.status === 201
-    ? ok('reordered JSON keys still match the fingerprint (canonical hashing)')
-    : bad(`key reordering broke the fingerprint → ${reordered.status}`);
+  check(
+    reordered.status === 200 || reordered.status === 201,
+    'reordered JSON keys still match the fingerprint (canonical hashing)',
+    `key reordering broke the fingerprint → ${reordered.status}`,
+  );
 
   expect(
     'same key + genuinely different payload',
-    (await call('POST', '/bookings/confirm', {
-      token: patientToken,
-      idempotencyKey: confirmKey,
-      body: { ...confirmBody, chiefComplaint: 'A completely different complaint' },
-    })).status,
+    (
+      await call('POST', '/bookings/confirm', {
+        token: patientToken,
+        idempotencyKey: confirmKey,
+        body: { ...confirmBody, chiefComplaint: 'A completely different complaint' },
+      })
+    ).status,
     409,
   );
   expect(
@@ -313,11 +374,13 @@ async function main(): Promise<void> {
   bold('7 · Concurrency: double-booking defences');
   expect(
     'holding an already-booked slot',
-    (await call('POST', '/bookings/hold', {
-      token: patientToken,
-      idempotencyKey: randomUUID(),
-      body: { slotId: slot.id },
-    })).status,
+    (
+      await call('POST', '/bookings/hold', {
+        token: patientToken,
+        idempotencyKey: randomUUID(),
+        body: { slotId: slot.id },
+      })
+    ).status,
     409,
   );
 
@@ -335,9 +398,11 @@ async function main(): Promise<void> {
     );
     const wins = results.filter((r) => r.status === 201).length;
     const conflicts = results.filter((r) => r.status === 409).length;
-    wins === 1
-      ? ok(`8 concurrent holds on one slot → exactly 1 winner, ${conflicts} rejected with 409`)
-      : bad(`expected exactly 1 winner, got ${wins}`);
+    check(
+      wins === 1,
+      `8 concurrent holds on one slot → exactly 1 winner, ${conflicts} rejected with 409`,
+      `expected exactly 1 winner, got ${wins}`,
+    );
   }
 
   // ------------------------------------------------- 8. consultation flow
@@ -354,10 +419,12 @@ async function main(): Promise<void> {
   );
   expect(
     'clinical notes written (AES-256-GCM at rest)',
-    (await call('PATCH', `/consultations/${consultationId}/notes`, {
-      token: doctor.token,
-      body: { notes: 'Patient reports improvement. Continue regimen for two weeks.' },
-    })).status,
+    (
+      await call('PATCH', `/consultations/${consultationId}/notes`, {
+        token: doctor.token,
+        body: { notes: 'Patient reports improvement. Continue regimen for two weeks.' },
+      })
+    ).status,
     200,
   );
 
@@ -392,9 +459,11 @@ async function main(): Promise<void> {
     409,
   );
   const verified = await call('GET', `/prescriptions/${rxId}/verify`, { token: doctor.token });
-  verified.body.valid
-    ? ok('signature verifies against the stored clinical content')
-    : bad('signature verification failed');
+  check(
+    verified.body.valid,
+    'signature verifies against the stored clinical content',
+    'signature verification failed',
+  );
 
   let pdfReady = false;
   for (let i = 0; i < 30; i++) {
@@ -410,12 +479,16 @@ async function main(): Promise<void> {
       headers: { Authorization: `Bearer ${doctor.token}` },
     });
     const bytes = Buffer.from(await pdf.arrayBuffer());
-    bytes.subarray(0, 4).toString() === '%PDF'
-      ? ok(`PDF rendered asynchronously via outbox → BullMQ (${bytes.length} bytes)`)
-      : bad('PDF content is not a valid PDF');
-    pdf.headers.get('cache-control') === 'no-store'
-      ? ok('PHI download sent with `Cache-Control: no-store`')
-      : bad('PDF response is cacheable');
+    check(
+      bytes.subarray(0, 4).toString() === '%PDF',
+      `PDF rendered asynchronously via outbox → BullMQ (${bytes.length} bytes)`,
+      'PDF content is not a valid PDF',
+    );
+    check(
+      pdf.headers.get('cache-control') === 'no-store',
+      'PHI download sent with `Cache-Control: no-store`',
+      'PDF response is cacheable',
+    );
   } else {
     bad('PDF not ready within 15s');
   }
@@ -438,10 +511,14 @@ async function main(): Promise<void> {
     });
 
   const wh1 = await (await post({ 'X-Signature': sign(ts, payload), 'X-Timestamp': ts }, payload)).json();
-  wh1.duplicate === false ? ok('first delivery processed') : bad('first delivery not processed');
+  check(wh1.duplicate === false, 'first delivery processed', 'first delivery not processed');
   const wh2 = await (await post({ 'X-Signature': sign(ts, payload), 'X-Timestamp': ts }, payload)).json();
-  wh2.duplicate === true ? ok('redelivery deduped — no double effect') : bad('redelivery not deduped');
-  expect('forged signature', (await post({ 'X-Signature': 'deadbeef', 'X-Timestamp': ts }, payload)).status, 403);
+  check(wh2.duplicate === true, 'redelivery deduped — no double effect', 'redelivery not deduped');
+  expect(
+    'forged signature',
+    (await post({ 'X-Signature': 'deadbeef', 'X-Timestamp': ts }, payload)).status,
+    403,
+  );
   const stale = Math.floor(Date.now() / 1000 - 4000).toString();
   expect(
     'stale timestamp outside the replay window',
@@ -452,7 +529,11 @@ async function main(): Promise<void> {
 
   // ------------------------------------------------------ 11. authorization
   bold('11 · Authorization: RBAC, BOLA, step-up');
-  expect('patient → admin analytics', (await call('GET', '/admin/analytics/overview', { token: patientToken })).status, 403);
+  expect(
+    'patient → admin analytics',
+    (await call('GET', '/admin/analytics/overview', { token: patientToken })).status,
+    403,
+  );
   expect(
     'patient → drive clinical state',
     (await call('POST', `/consultations/${consultationId}/complete`, { token: patientToken })).status,
@@ -474,18 +555,22 @@ async function main(): Promise<void> {
   );
   expect(
     "doctor → edit another doctor's profile",
-    (await call('PATCH', `/doctors/${search.body.items[0].id}`, {
-      token: doctor.token,
-      body: { bio: 'hijacked' },
-    })).status,
+    (
+      await call('PATCH', `/doctors/${search.body.items[0].id}`, {
+        token: doctor.token,
+        body: { bio: 'hijacked' },
+      })
+    ).status,
     403,
   );
   expect(
     'self-promotion to verified is admin-only',
-    (await call('PATCH', `/doctors/${doctorId}`, {
-      token: doctor.token,
-      body: { verificationState: 'verified' },
-    })).status,
+    (
+      await call('PATCH', `/doctors/${doctorId}`, {
+        token: doctor.token,
+        body: { verificationState: 'verified' },
+      })
+    ).status,
     403,
   );
 
@@ -514,25 +599,29 @@ async function main(): Promise<void> {
   bold('13 · Input validation (whitelist + forbidNonWhitelisted)');
   expect(
     'unknown property rejected',
-    (await call('POST', '/bookings/hold', {
-      token: patientToken,
-      idempotencyKey: randomUUID(),
-      body: { slotId: slot.id, isAdmin: true },
-    })).status,
+    (
+      await call('POST', '/bookings/hold', {
+        token: patientToken,
+        idempotencyKey: randomUUID(),
+        body: { slotId: slot.id, isAdmin: true },
+      })
+    ).status,
     400,
   );
   expect(
     'malformed uuid rejected',
-    (await call('POST', '/bookings/hold', {
-      token: patientToken,
-      idempotencyKey: randomUUID(),
-      body: { slotId: 'not-a-uuid' },
-    })).status,
+    (
+      await call('POST', '/bookings/hold', {
+        token: patientToken,
+        idempotencyKey: randomUUID(),
+        body: { slotId: 'not-a-uuid' },
+      })
+    ).status,
     400,
   );
   expect(
     'SQL injection attempt is just a harmless string',
-    (await call('GET', "/doctors/search?q=%27%3B%20DROP%20TABLE%20users%3B--")).status,
+    (await call('GET', '/doctors/search?q=%27%3B%20DROP%20TABLE%20users%3B--')).status,
     200,
   );
 
@@ -540,9 +629,11 @@ async function main(): Promise<void> {
   bold('14 · Observability');
   expect('liveness probe', (await call('GET', `${BASE}/healthz`)).status, 200);
   const ready = await call('GET', `${BASE}/readyz`);
-  ready.body.checks?.postgres?.status === 'up' && ready.body.checks?.redis?.status === 'up'
-    ? ok('readiness deep-checks Postgres + Redis')
-    : bad('readiness check failed');
+  check(
+    ready.body.checks?.postgres?.status === 'up' && ready.body.checks?.redis?.status === 'up',
+    'readiness deep-checks Postgres + Redis',
+    'readiness check failed',
+  );
 
   const metricsText = await (await fetch(`${BASE}/metrics`)).text();
   const required = [
@@ -557,9 +648,11 @@ async function main(): Promise<void> {
     'db_pool_total',
   ];
   const missing = required.filter((m) => !metricsText.includes(`# HELP ${m}`));
-  missing.length === 0
-    ? ok(`all ${required.length} RED/business metrics exported`)
-    : bad(`missing metrics: ${missing.join(', ')}`);
+  check(
+    missing.length === 0,
+    `all ${required.length} RED/business metrics exported`,
+    `missing metrics: ${missing.join(', ')}`,
+  );
   const conflictSamples = metricsText
     .split('\n')
     .filter((l) => l.startsWith('booking_conflicts_total{'))
@@ -571,9 +664,11 @@ async function main(): Promise<void> {
   const admin = await adminSession();
   if (admin) {
     const chain = await call('GET', '/admin/audit-logs/verify', { token: admin });
-    chain.body.verified
-      ? ok(`hash chain intact across ${chain.body.checked} entries`)
-      : bad(`chain broken at id ${chain.body.brokenAtId}`);
+    check(
+      chain.body.verified,
+      `hash chain intact across ${chain.body.checked} entries`,
+      `chain broken at id ${chain.body.brokenAtId}`,
+    );
 
     const logs = await call('GET', '/admin/audit-logs?limit=5', { token: admin });
     ok(`audit query returned ${logs.body.items?.length} recent entries`);
@@ -582,11 +677,17 @@ async function main(): Promise<void> {
     }
 
     const overview = await call('GET', '/admin/analytics/overview', { token: admin });
-    overview.status === 200
-      ? ok(`analytics: ${overview.body.totals.consultations} consultations · ${overview.body.totals.doctors} doctors`)
-      : bad(`analytics → ${overview.status}`);
+    check(
+      overview.status === 200,
+      `analytics: ${overview.body.totals.consultations} consultations · ${overview.body.totals.doctors} doctors`,
+      `analytics → ${overview.status}`,
+    );
     const funnel = await call('GET', '/admin/analytics/funnel?days=30', { token: admin });
-    funnel.status === 200 ? ok(`booking funnel: ${JSON.stringify(funnel.body.stages ?? funnel.body)}`) : bad('funnel failed');
+    check(
+      funnel.status === 200,
+      `booking funnel: ${JSON.stringify(funnel.body.stages ?? funnel.body)}`,
+      'funnel failed',
+    );
 
     // ------------------------------------------------------ 16. GDPR erasure
     bold('16 · GDPR erasure (crypto-shredding)');
@@ -620,11 +721,12 @@ async function main(): Promise<void> {
     ).status;
     if (last === 429) break;
   }
-  last === 429 ? ok('credential stuffing throttled with 429 + Retry-After') : bad(`expected 429, got ${last}`);
-
+  check(last === 429, 'credential stuffing throttled with 429 + Retry-After', `expected 429, got ${last}`);
 
   console.log(
-    `\n\x1b[1mSummary\x1b[0m  \x1b[32m${passed} passed\x1b[0m` + (failed ? `, \x1b[31m${failed} failed\x1b[0m` : '') + '\n',
+    `\n\x1b[1mSummary\x1b[0m  \x1b[32m${passed} passed\x1b[0m` +
+      (failed ? `, \x1b[31m${failed} failed\x1b[0m` : '') +
+      '\n',
   );
   if (failed) process.exitCode = 1;
 }

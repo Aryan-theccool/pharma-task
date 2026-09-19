@@ -14,7 +14,6 @@ import { metrics } from '../../observability/metrics';
  */
 @Injectable()
 export class SagaService {
-
   constructor(private readonly db: DatabaseService) {}
 
   async start(type: string, payload: Record<string, unknown>): Promise<string> {
@@ -43,13 +42,7 @@ export class SagaService {
               payload = payload || $5::jsonb,
               updated_at = now()
         WHERE id = $1`,
-      [
-        sagaId,
-        step,
-        JSON.stringify([step]),
-        compensation ?? null,
-        JSON.stringify(stripMeta(meta)),
-      ],
+      [sagaId, step, JSON.stringify([step]), compensation ?? null, JSON.stringify(stripMeta(meta))],
     );
   }
 

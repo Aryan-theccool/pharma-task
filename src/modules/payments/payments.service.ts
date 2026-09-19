@@ -40,7 +40,13 @@ export class PaymentsService {
   /** Authorize inside the booking saga (client supplied by the caller's tx). */
   async authorizeForBooking(
     client: PoolClient,
-    input: { patientId: string; amount: number; currency: string; bookingRef: string; idempotencyKey: string },
+    input: {
+      patientId: string;
+      amount: number;
+      currency: string;
+      bookingRef: string;
+      idempotencyKey: string;
+    },
   ): Promise<PaymentRow> {
     const result = await this.gateway.authorize({
       idempotencyKey: input.idempotencyKey,
@@ -196,10 +202,10 @@ export class PaymentsService {
     if (body.providerRef && body.status) {
       const allowed = ['authorized', 'captured', 'failed', 'refunded', 'voided'];
       if (allowed.includes(body.status)) {
-        await this.db.query(
-          `UPDATE payments SET status = $2, updated_at = now() WHERE provider_ref = $1`,
-          [body.providerRef, body.status],
-        );
+        await this.db.query(`UPDATE payments SET status = $2, updated_at = now() WHERE provider_ref = $1`, [
+          body.providerRef,
+          body.status,
+        ]);
       }
     }
 

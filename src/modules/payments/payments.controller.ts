@@ -39,11 +39,7 @@ export class PaymentsController {
     summary: 'Refund a payment (step-up MFA required)',
     description: 'Full or partial. Idempotency-Key guarantees a retry never issues a second refund.',
   })
-  refund(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: RefundDto,
-    @CurrentUser() user: JwtPayload,
-  ) {
+  refund(@Param('id', ParseUUIDPipe) id: string, @Body() dto: RefundDto, @CurrentUser() user: JwtPayload) {
     return this.payments.refund(id, user, dto.amount, `refund-api:${id}:${dto.amount ?? 'full'}`, dto.reason);
   }
 

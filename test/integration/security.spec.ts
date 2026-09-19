@@ -158,10 +158,7 @@ describe('security (integration)', () => {
       "admin'--",
       '1; DELETE FROM consultations WHERE 1=1; --',
     ])('treats %s as an ordinary search string', async (payload) => {
-      const res = await request(ctx.server)
-        .get('/api/v1/doctors/search')
-        .query({ q: payload })
-        .expect(200);
+      const res = await request(ctx.server).get('/api/v1/doctors/search').query({ q: payload }).expect(200);
       expect(Array.isArray(res.body.items)).toBe(true);
     });
 

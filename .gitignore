@@ -1,16 +1,27 @@
-!.env.example
-!load/results/.gitkeep
-*.log
+# dependencies & build output
+node_modules/
+dist/
+coverage/
 *.tsbuildinfo
-.DS_Store
+
+# runtime artefacts
+*.log
+storage/
+.tmp/
+tmp/
+.pgdata/
+.localstack/
+load/results/*.json
+!load/results/.gitkeep
+
+# local secrets — order matters: ignore .env*, then re-include the templates
 .env
 .env.*
-.localstack/
-.pgdata/
-.tmp/
-coverage/
-dist/
-load/results/*.json
-node_modules/
-storage/
-tmp/
+!.env.example
+!.env.docker
+!.env.test.example
+
+# editors / OS
+.DS_Store
+.idea/
+.vscode/
