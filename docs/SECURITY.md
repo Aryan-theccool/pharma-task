@@ -211,7 +211,16 @@ grants (`db/migrations/0004_grants.sql`), CloudTrail on RDS, WORM backups.
 - [ ] Penetration test
 - [ ] Sign a BAA with AWS before real PHI is stored
 - [ ] Enable Renovate, SBOM, image signing
-- [ ] Add the stuck-saga reconciler ([ADR-0004](adr/0004-saga-vs-2pc.md))
+- [ ] Set `INTEGRITY_PROOF_KEY` to a dedicated KMS key, **separate from
+      `ENCRYPTION_MASTER_KEY`** — sharing them means one leak defeats both
+      confidentiality and tamper detection
+- [ ] Confirm the runtime role is `app_user`, not the table owner: the journal
+      grants (SELECT only) are what stop the application forging its own history
+- [ ] Verify `clinical_integrity_last_run_timestamp_seconds` is being scraped —
+      a silent detector is an unmonitored window
+- [ ] `PAYMENT_PROVIDER=razorpay` with live keys; the app refuses to boot with
+      the mock gateway when `NODE_ENV=production`
+- [ ] Run the PSP go-live checklist in [RUNBOOK.md](RUNBOOK.md)
 
 ---
 
@@ -220,13 +229,43 @@ grants (`db/migrations/0004_grants.sql`), CloudTrail on RDS, WORM backups.
 Stated plainly, because a security document that claims completeness is a
 security document nobody should trust:
 
-1. **Clinical-row tampering is not detected in-application** — mitigated by
-   grants, CloudTrail and WORM backups, not by the hash chain.
-2. **Rate limiter fails open** on a Redis outage — a deliberate
+1. **Rate limiter fails open** on a Redis outage — a deliberate
    availability trade-off; the WAF is the fail-closed backstop.
-3. **No stuck-saga reconciler** — a process killed mid-saga needs manual
-   intervention today.
-4. **Payment provider is a stub** — the integration seam is right, but it has
-   not been proven against a live PSP.
-5. **No automated dependency updates** — scanning detects, nothing remediates.
-6. **No penetration test** — no third party has attacked this.
+2. **Payment adapter is contract-tested, not sandbox-tested.** The Razorpay
+   adapter (`src/modules/payments/razorpay.gateway.ts`) implements the
+   documented HTTP contract and is asserted by
+   `test/unit/razorpay-gateway.spec.ts` — request shape, auth header,
+   idempotency propagation, 4xx-vs-5xx retry behaviour, signature verification
+   and paise conversion. It has **not** been run against Razorpay's live
+   sandbox, because this build environment has no outbound access to their
+   API. The go-live checklist in [RUNBOOK.md](RUNBOOK.md) covers that step.
+3. **No automated dependency updates** — scanning detects, nothing remediates.
+4. **No penetration test** — no third party has attacked this.
+5. **Integrity detection is detective, not preventive.** An attacker with a
+   database credential can still *make* a clinical write; what changed is that
+   they can no longer make one unnoticed. Prevention remains the job of the
+   least-privilege grants in `0004_grants.sql` and IAM.
+6. **Baseline rows attest only from the moment protection was enabled.** Rows
+   that predate `0005_clinical_integrity.sql` are journaled with a `baseline`
+   marker; the control cannot speak to what happened to them before that point.
+
+### Closed since the first draft
+
+Recorded here rather than deleted, because how a gap was closed is part of the
+security argument:
+
+- **Clinical-row tampering is now detected.** Previously the hash chain covered
+  `audit_logs` only, so a direct `UPDATE prescriptions ...` was invisible. A
+  SECURITY DEFINER trigger now journals every clinical mutation with a
+  per-process HMAC **proof of application origin**; the key lives outside the
+  database, so a party with database access cannot mint one. Six checks catch
+  the corresponding evasions — unattributed writes, rows changed with the
+  trigger disabled, unjournaled inserts, vanished rows, edited journal entries
+  and deleted journal ranges. Proven by nine tests in
+  `test/integration/integrity.spec.ts`, each of which performs the actual
+  attack. See [ADR-0010](adr/0010-clinical-integrity.md).
+- **Stuck sagas now self-heal.** A process killed mid-saga used to leave the
+  slot held and the payment authorized indefinitely. A reconciler claims stale
+  sagas with `FOR UPDATE SKIP LOCKED`, compensates in reverse order, and
+  dead-letters anything it cannot fix instead of retrying forever. See
+  [ADR-0011](adr/0011-saga-recovery.md).

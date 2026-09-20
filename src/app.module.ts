@@ -20,6 +20,7 @@ import { PrescriptionsModule } from './modules/prescriptions/prescriptions.modul
 import { PaymentsModule } from './modules/payments/payments.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { HealthModule } from './modules/health/health.module';
+import { IntegrityModule } from './modules/integrity/integrity.module';
 
 import { IdempotencyInterceptor } from './common/idempotency/idempotency.interceptor';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
@@ -107,6 +108,7 @@ import { currentTraceIds } from './observability/tracing';
     PrescriptionsModule,
     PaymentsModule,
     AdminModule,
+    IntegrityModule,
     HealthModule,
     QueueModule,
   ],

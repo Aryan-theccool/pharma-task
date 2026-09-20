@@ -139,6 +139,44 @@ class Metrics {
     labelNames: ['operation'] as const,
   });
 
+  /**
+   * Outstanding clinical-integrity findings by kind. A Gauge rather than a
+   * Counter: this is a current-state fact ("3 rows are divergent right now"),
+   * and it must fall back to zero once an incident is resolved. Any non-zero
+   * value pages — see observability/alerts.yml.
+   */
+  readonly integrityFindings = new Gauge({
+    name: 'clinical_integrity_findings',
+    help: 'Outstanding clinical integrity findings by kind (0 = clean)',
+    labelNames: ['kind'] as const,
+  });
+
+  /** Unix seconds of the last completed sweep — alerts if the sweep stops. */
+  readonly integrityLastRunTimestamp = new Gauge({
+    name: 'clinical_integrity_last_run_timestamp_seconds',
+    help: 'Unix timestamp of the last completed clinical integrity sweep',
+  });
+
+  /** Saga recovery actions taken by the reconciler. */
+  readonly sagaRecoveries = new Counter({
+    name: 'saga_recoveries_total',
+    help: 'Stuck sagas acted on by the reconciler',
+    labelNames: ['saga', 'action'] as const,
+  });
+
+  /** Sagas currently stuck beyond the staleness threshold. */
+  readonly sagaStuck = new Gauge({
+    name: 'saga_stuck_instances',
+    help: 'Saga instances stuck in a non-terminal state beyond the threshold',
+    labelNames: ['state'] as const,
+  });
+
+  /** Sagas the reconciler could not fix and has parked for a human. */
+  readonly sagaDeadLettered = new Gauge({
+    name: 'saga_dead_lettered_instances',
+    help: 'Saga instances parked for manual intervention',
+  });
+
   private poolCollector?: () => { total: number; idle: number; waiting: number };
 
   constructor() {
@@ -153,6 +191,11 @@ class Metrics {
       this.idempotencyEvents,
       this.sagaSteps,
       this.sagaCompensations,
+      this.sagaRecoveries,
+      this.sagaStuck,
+      this.sagaDeadLettered,
+      this.integrityFindings,
+      this.integrityLastRunTimestamp,
       this.authEvents,
       this.rateLimitRejections,
       this.outboxPublished,

@@ -134,3 +134,58 @@ groups:
         annotations:
           summary: 'Clients are reusing idempotency keys with different payloads'
           description: 'Usually a client bug: a retry is mutating its payload between attempts.'
+
+      # -------------------------------------------------- clinical integrity
+      # Any non-zero value here means clinical data was changed by something
+      # other than the application. There is no "acceptable rate" of this, so
+      # the threshold is > 0 and the wait is short — an attacker with database
+      # access is an active incident, not a trend to watch.
+      - alert: ClinicalIntegrityViolation
+        expr: max(clinical_integrity_findings) > 0
+        for: 1m
+        labels: { severity: critical, domain: security, page: immediate }
+        annotations:
+          summary: 'Clinical data was modified outside the application ({{ $labels.kind }})'
+          description: >-
+            GET /api/v1/admin/integrity/verify names the affected rows, the
+            database user and the client address. Treat as a confirmed breach
+            until proven otherwise.
+          runbook: 'docs/RUNBOOK.md#clinical-integrity-violation'
+
+      # The sweep going quiet is itself a finding: an attacker who can stop the
+      # detector gets an unmonitored window. Alerts if no sweep completes for
+      # 20 minutes (the schedule is every 5).
+      - alert: ClinicalIntegritySweepStalled
+        expr: time() - clinical_integrity_last_run_timestamp_seconds > 1200
+        for: 5m
+        labels: { severity: critical, domain: security }
+        annotations:
+          summary: 'Clinical integrity sweep has not completed in over 20 minutes'
+          description: 'Tamper detection is not running. Clinical writes are currently unverified.'
+          runbook: 'docs/RUNBOOK.md#clinical-integrity-violation'
+
+      # ------------------------------------------------------- saga recovery
+      - alert: SagasStuck
+        expr: sum(saga_stuck_instances) > 0
+        for: 10m
+        labels: { severity: warning, domain: correctness }
+        annotations:
+          summary: '{{ $value }} saga(s) have been mid-flight for longer than the stuck threshold'
+          description: >-
+            The reconciler runs every minute; sagas still stuck after ten
+            suggest recovery is failing rather than merely pending.
+          runbook: 'docs/RUNBOOK.md#stuck-sagas'
+
+      # A dead letter is money or inventory in an indeterminate state. It will
+      # not resolve itself — the reconciler has already given up.
+      - alert: SagaDeadLettered
+        expr: saga_dead_lettered_instances > 0
+        for: 1m
+        labels: { severity: critical, domain: correctness }
+        annotations:
+          summary: '{{ $value }} saga(s) need manual intervention'
+          description: >-
+            GET /api/v1/admin/integrity/saga-dead-letters lists them. Each one
+            may be a patient charged without a booking, or a slot held with no
+            consultation.
+          runbook: 'docs/RUNBOOK.md#stuck-sagas'

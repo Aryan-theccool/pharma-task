@@ -14,9 +14,9 @@ Drizzle ORM · OpenTelemetry · Prometheus · Docker · Terraform (AWS)
 
 | | |
 | --- | --- |
-| **Tests** | 123 passing across 8 suites — integration runs against real Postgres and Redis |
-| **Coverage** | ~74% statements · ~78% lines (floors enforced in CI) |
-| **API** | 46 paths / 50 operations, OpenAPI 3.0 generated from code |
+| **Tests** | 163 passing across 11 suites — integration runs against real Postgres and Redis |
+| **Coverage** | ~78% statements · ~80% lines (floors enforced in CI) |
+| **API** | 51 paths / 55 operations, OpenAPI 3.0 generated from code |
 | **Load** | 1,910 rps reads at p95 61 ms on 2 shared vCPUs — [report](load/README.md) |
 | **Concurrency** | 19,912 simultaneous bookings on one slot → exactly **1 success, 19,911 clean 409s** |
 
@@ -157,10 +157,24 @@ async PDF generation through a queue.
 encryption with versioned keys, crypto-shredding erasure that preserves the
 7-year clinical retention.
 
+**Clinical tamper detection** — the audit chain protects `audit_logs` only, so
+a separate control protects the clinical tables. Every write to
+`consultations`, `prescriptions` and `payments` is journaled with an HMAC
+**proof of application origin**; the key never reaches the database, so a write
+made with psql or a leaked credential is recorded as unattributed and paged on
+within five minutes. Seven evasion routes — including disabling the trigger,
+editing the journal and deleting journal rows — are each covered by a test that
+performs the attack. [ADR-0010](docs/adr/0010-clinical-integrity.md)
+
+**Crash recovery** — a saga abandoned by a killed process is reclaimed by a
+reconciler that compensates in reverse and dead-letters what it cannot fix, so
+a patient is never left with money held and no appointment.
+[ADR-0011](docs/adr/0011-saga-recovery.md)
+
 **Observability** — RED metrics plus domain metrics
 (`booking_conflicts_total{defence}`, `saga_compensations_total`,
 `outbox_pending_events`), structured logs with PHI redaction, OpenTelemetry
-traces, a 24-panel Grafana dashboard and 13 SLO alert rules.
+traces, a 37-panel Grafana dashboard and 17 SLO alert rules.
 
 **Reliability** — transactional outbox (no dual-write window), circuit breaker
 on the payment provider, BullMQ retries, graceful shutdown.
@@ -178,13 +192,13 @@ src/
 ├── observability/    metrics, tracing, logging
 └── queue/            BullMQ producers and workers
 
-db/migrations/        4 hand-written SQL migrations (21 tables, 33 indexes, 2 matviews)
+db/migrations/        7 hand-written SQL migrations (23 tables, 38 indexes, 2 matviews)
 test/unit/            4 specs — pure logic
 test/integration/     4 suites — real Postgres and Redis
 load/                 autocannon suite + measured report
 infra/terraform/      6 modules, dev and prod stacks
 observability/        Prometheus config, alert rules, Grafana dashboards
-docs/                 architecture, security, threat model, 9 ADRs, OpenAPI
+docs/                 architecture, security, threat model, 11 ADRs, OpenAPI
 scripts/              migrate, seed, key generation/rotation, demo, OpenAPI generation
 ```
 

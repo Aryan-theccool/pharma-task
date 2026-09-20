@@ -1,7 +1,27 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { hkdfSync } from 'node:crypto';
 import { Pool, PoolClient, QueryResultRow } from 'pg';
 import { metrics } from '../observability/metrics';
+import { mintProof, proofConnectionOptions } from '../common/crypto/integrity-proof';
+
+/**
+ * Derive the integrity signing key.
+ *
+ * Falls back to the master key when INTEGRITY_PROOF_KEY is unset, so existing
+ * deployments keep working; HKDF with a distinct `info` guarantees the derived
+ * key is unrelated to the field-encryption DEKs, so leaking one does not
+ * compromise the other.
+ */
+function integrityKeyFrom(config: ConfigService): Buffer {
+  const explicit = config.get<string>('INTEGRITY_PROOF_KEY');
+  const material = explicit ?? config.getOrThrow<string>('ENCRYPTION_MASTER_KEY');
+  const isHex = /^[0-9a-f]+$/i.test(material) && material.length % 2 === 0;
+  const raw = isHex ? Buffer.from(material, 'hex') : Buffer.from(material, 'utf8');
+  return Buffer.from(hkdfSync('sha256', raw, Buffer.alloc(0), Buffer.from('amrutam-integrity'), 32));
+}
+
+export { integrityKeyFrom };
 
 export type SqlParams = ReadonlyArray<unknown>;
 
@@ -20,10 +40,20 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
   private readonly replica: Pool;
   readonly hasReplica: boolean;
 
+  /** Proof of application origin stamped on every clinical write. */
+  readonly integrityProof: string;
+
   constructor(private readonly config: ConfigService) {
     const connectionString = this.config.getOrThrow<string>('DATABASE_URL');
     const max = this.config.get<number>('DATABASE_POOL_MAX', 20);
     const statementTimeout = this.config.get<number>('DATABASE_STATEMENT_TIMEOUT_MS', 10_000);
+
+    // Minted once per process. Every connection this pool opens presents it in
+    // the startup packet, so the capture trigger can record that the write came
+    // from an application holding the key — and, by its absence, that a write
+    // did not. See src/common/crypto/integrity-proof.ts.
+    this.integrityProof = mintProof(integrityKeyFrom(this.config));
+    const options = proofConnectionOptions(this.integrityProof);
 
     this.primary = new Pool({
       connectionString,
@@ -32,6 +62,7 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
       idleTimeoutMillis: 30_000,
       connectionTimeoutMillis: 5_000,
       application_name: 'amrutam-api',
+      options,
     });
 
     const replicaUrl = this.config.get<string>('DATABASE_REPLICA_URL');
@@ -42,6 +73,7 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
           max,
           statement_timeout: statementTimeout,
           application_name: 'amrutam-api-ro',
+          options,
         })
       : this.primary;
 

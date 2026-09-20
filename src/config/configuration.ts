@@ -27,6 +27,33 @@ export const envSchema = z.object({
   EMAIL_HMAC_KEY: z.string().min(32),
   PRESCRIPTION_SIGNING_KEY: z.string().min(32),
   PAYMENT_WEBHOOK_SECRET: z.string().min(16),
+  /**
+   * Signs the proof-of-origin token stamped on every clinical write. Must NOT
+   * be known to the database: the whole point is that a party with database
+   * access cannot mint one. Defaults to a key derived from
+   * ENCRYPTION_MASTER_KEY so existing deployments keep working, but production
+   * should set it explicitly and store it in a separate KMS key.
+   */
+  INTEGRITY_PROOF_KEY: z.string().min(32).optional(),
+  /** How long a minted proof stays acceptable (default 30 days). */
+  INTEGRITY_PROOF_MAX_AGE_SECONDS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(30 * 24 * 60 * 60),
+  /** Rows scanned per integrity sweep. */
+  INTEGRITY_SCAN_LIMIT: z.coerce.number().int().positive().default(500),
+
+  /**
+   * A saga untouched for this long is presumed abandoned by a dead process.
+   * Must exceed the slowest legitimate confirm (payment authorize + capture
+   * with retries); 5 minutes is ~60x the observed p99.
+   */
+  SAGA_STUCK_AFTER_SECONDS: z.coerce.number().int().positive().default(300),
+  /** Recovery attempts before a saga is dead-lettered for a human. */
+  SAGA_RECOVERY_MAX_ATTEMPTS: z.coerce.number().int().positive().default(5),
+  /** Sagas processed per reconciliation pass. */
+  SAGA_RECOVERY_BATCH_SIZE: z.coerce.number().int().positive().default(20),
 
   IDEMPOTENCY_TTL_HOURS: z.coerce.number().int().positive().default(24),
   BOOKING_HOLD_TTL_SECONDS: z.coerce.number().int().positive().default(300),
@@ -61,6 +88,17 @@ export const envSchema = z.object({
     .default('true')
     .transform((v) => v === 'true'),
   PAYMENT_FAILURE_RATE: z.coerce.number().min(0).max(1).default(0),
+
+  /**
+   * Which payment adapter to bind. `mock` is rejected at boot when
+   * NODE_ENV=production — see PaymentsModule.
+   */
+  PAYMENT_PROVIDER: z.enum(['mock', 'razorpay']).default('mock'),
+  PAYMENT_TIMEOUT_MS: z.coerce.number().int().positive().default(5_000),
+  RAZORPAY_BASE_URL: z.string().default('https://api.razorpay.com'),
+  RAZORPAY_KEY_ID: z.string().optional(),
+  RAZORPAY_KEY_SECRET: z.string().optional(),
+  RAZORPAY_WEBHOOK_SECRET: z.string().optional(),
 });
 
 export type AppEnv = z.infer<typeof envSchema>;

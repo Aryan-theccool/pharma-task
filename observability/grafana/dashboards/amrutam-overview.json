@@ -489,7 +489,7 @@
     },
     {
       "id": 2,
-      "title": "RED \u2014 rate, errors, duration",
+      "title": "RED — rate, errors, duration",
       "type": "row",
       "collapsed": false,
       "gridPos": {
@@ -787,7 +787,7 @@
     },
     {
       "id": 3,
-      "title": "Booking \u2014 the critical business flow",
+      "title": "Booking — the critical business flow",
       "type": "row",
       "collapsed": false,
       "gridPos": {
@@ -1131,7 +1131,7 @@
         "type": "prometheus",
         "uid": "${DS}"
       },
-      "description": "`replay` proves retries are safe. `conflict` means a client reused a key with a different payload \u2014 almost always a client bug.",
+      "description": "`replay` proves retries are safe. `conflict` means a client reused a key with a different payload — almost always a client bug.",
       "targets": [
         {
           "datasource": {
@@ -1188,7 +1188,7 @@
     },
     {
       "id": 4,
-      "title": "Reliability \u2014 queues, outbox, breakers",
+      "title": "Reliability — queues, outbox, breakers",
       "type": "row",
       "collapsed": false,
       "gridPos": {
@@ -1793,6 +1793,368 @@
           "sort": "desc"
         }
       }
+    },
+    {
+      "id": 200,
+      "type": "row",
+      "title": "Clinical integrity & crash recovery",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 63
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 201,
+      "title": "Clinical integrity findings",
+      "type": "stat",
+      "gridPos": {
+        "h": 7,
+        "w": 6,
+        "x": 0,
+        "y": 64
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS}"
+      },
+      "description": "Clinical rows modified by something other than the application. Any non-zero value is a confirmed integrity incident — there is no acceptable background rate.",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS}"
+          },
+          "editorMode": "code",
+          "expr": "sum(clinical_integrity_findings)",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "textMode": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 202,
+      "title": "Findings by kind",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 7,
+        "w": 10,
+        "x": 6,
+        "y": 64
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS}"
+      },
+      "description": "unattributed_write = a direct database session. divergent_row = written with the capture trigger disabled. checkpoint_mismatch = journal entries deleted.",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS}"
+          },
+          "editorMode": "code",
+          "expr": "clinical_integrity_findings > 0",
+          "legendFormat": "{{kind}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 203,
+      "title": "Minutes since last sweep",
+      "type": "stat",
+      "gridPos": {
+        "h": 7,
+        "w": 4,
+        "x": 16,
+        "y": 64
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS}"
+      },
+      "description": "The detector going quiet is itself a finding — it means clinical writes are currently unverified. Alerts past 20 minutes.",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS}"
+          },
+          "editorMode": "code",
+          "expr": "(time() - clinical_integrity_last_run_timestamp_seconds) / 60",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 10
+              },
+              {
+                "color": "red",
+                "value": 20
+              }
+            ]
+          },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "textMode": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 204,
+      "title": "Sagas needing a human",
+      "type": "stat",
+      "gridPos": {
+        "h": 7,
+        "w": 4,
+        "x": 20,
+        "y": 64
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS}"
+      },
+      "description": "Dead-lettered sagas. Each one is money or inventory in an indeterminate state; the reconciler has already given up.",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS}"
+          },
+          "editorMode": "code",
+          "expr": "saga_dead_lettered_instances",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "textMode": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 205,
+      "title": "Stuck sagas",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 71
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS}"
+      },
+      "description": "Sagas mid-flight past the stuck threshold. The reconciler runs every minute, so a sustained non-zero line means recovery is failing rather than pending.",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS}"
+          },
+          "editorMode": "code",
+          "expr": "sum by (state) (saga_stuck_instances)",
+          "legendFormat": "{{state}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 206,
+      "title": "Saga recovery actions",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 71
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS}"
+      },
+      "description": "What the reconciler did. compensated = rolled back cleanly. dead_lettered = gave up. A rising dead_lettered line needs the runbook.",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS}"
+          },
+          "editorMode": "code",
+          "expr": "sum by (action) (rate(saga_recoveries_total[5m]))",
+          "legendFormat": "{{action}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
     }
   ],
   "preload": false,
@@ -1838,7 +2200,7 @@
     ]
   },
   "timezone": "browser",
-  "title": "Amrutam Telemedicine \u2014 Service Overview",
+  "title": "Amrutam Telemedicine — Service Overview",
   "uid": "amrutam-overview",
   "version": 1,
   "weekStart": ""

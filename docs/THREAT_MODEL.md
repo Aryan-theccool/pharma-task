@@ -64,16 +64,43 @@ different message tells an attacker their probe reached the verification step.
 | --- | --- | --- | --- |
 | Modify a signed prescription | Low / Critical | Immutable after signing (re-sign → 409); HMAC over canonical JSON | Low |
 | Alter or delete audit entries | Low / Critical | Append-only rules + hash chain; `verify` endpoint | Low |
-| **Direct SQL tampering with clinical rows** | Low / Critical | Least-privilege grants, CloudTrail, WORM backups | **Med — not detected in-app** |
+| **Direct SQL tampering with clinical rows** | Low / Critical | Least-privilege grants + **proof-of-origin journal**: every clinical write is recorded with an HMAC minted outside the database, so a write from any non-application session is flagged | Low — detected within 5 min |
 | Idempotency-key replay with a mutated payload | Med / Med | SHA-256 fingerprint over canonical JSON → 409 | Low |
 | SQL injection | Med / Critical | Parameterised queries throughout; DTO whitelisting | Low |
 | Mass assignment | Med / High | `forbidNonWhitelisted: true`; role never bindable from a request body | Low |
 
-The clinical-row row is the honest weak point. The hash chain covers
-`audit_logs`, not `prescriptions` — confirmed by
-`test/integration/consultation.spec.ts`, which successfully tampers with
-`prescriptions.diagnosis_enc` via direct SQL. Defence lives outside the
-application.
+The clinical-row row used to be the honest weak point: the hash chain covers
+`audit_logs`, not `prescriptions`, and
+`test/integration/consultation.spec.ts` still demonstrates that a direct SQL
+write to `prescriptions.diagnosis_enc` does not break the audit chain. That
+remains true, and is why a second, independent control now exists.
+
+Every mutation of `consultations`, `prescriptions` and `payments` fires a
+SECURITY DEFINER trigger that journals a digest of the row together with a
+**proof of application origin** — an HMAC token the API presents on each
+connection. The signing key is held by the application and by KMS, never by
+the database, so an attacker with full database write access still cannot
+produce a valid proof. Their write lands in the journal marked unattributed,
+alongside the database user and client address they used.
+
+The evasions are covered too, each by a test that performs the attack:
+
+| Evasion | Detected by |
+| --- | --- |
+| Write with a database client | proof absent on the journal entry |
+| Forge a plausible proof | HMAC fails verification |
+| Disable the trigger, write, re-enable | live row digest ≠ newest journal digest |
+| Insert while disabled | row exists with no journal entry |
+| Delete while disabled | journaled row is absent from the table |
+| Edit a journal entry in place | `entry_hash` no longer matches its contents |
+| Delete journal entries | checkpointed range hash no longer folds correctly |
+| Drop the trigger and leave it off | trigger state reported on every sweep |
+
+Residual risk is now concentrated in one place: an attacker who obtains
+**both** database write access **and** the integrity key can mint valid
+proofs. That is a two-system compromise, and it is why the checklist requires
+the key to live in a KMS key distinct from the encryption master key.
+See [ADR-0010](adr/0010-clinical-integrity.md).
 
 ### Repudiation
 
@@ -130,7 +157,7 @@ from many IPs remains the most plausible DoS vector.
 
 | Surface | Exposure | Hardening |
 | --- | --- | --- |
-| 46 REST paths / 50 operations | Public via ALB | **10 unauthenticated**, the other 40 behind the guard chain |
+| 51 REST paths / 55 operations | Public via ALB | **10 unauthenticated**, the other 45 behind the guard chain |
 | `POST /auth/login` | Unauthenticated | Lockout, rate limit, generic errors, constant-time compare |
 | `POST /auth/register` | Unauthenticated | 5/min per IP, strength rules, role forced |
 | `POST /payments/webhook` | Unauthenticated by design | HMAC over raw body, timestamp window, dedupe |
@@ -177,14 +204,16 @@ anomaly detection on access volume per actor).
 
 | # | Item | Severity | Effort |
 | --- | --- | --- | --- |
-| 1 | Stuck-saga reconciler ([ADR-0004](adr/0004-saga-vs-2pc.md)) | High | Low |
-| 2 | Anomaly alerting on per-actor PHI access volume | High | Med |
-| 3 | WORM/object-locked backups of `audit_logs` | High | Low |
-| 4 | Breached-password check (k-anonymity HIBP API) at registration | Med | Low |
-| 5 | Renovate + SBOM + image signing | Med | Low |
-| 6 | Per-user concurrent-hold cap to blunt slot squatting | Med | Low |
-| 7 | Chaos test: kill Redis mid-booking, assert DB defences hold | Med | Med |
-| 8 | Third-party penetration test | Med | High |
+| ~~1~~ | ~~Stuck-saga reconciler~~ — **done**, [ADR-0011](adr/0011-saga-recovery.md) | High | Low |
+| ~~2~~ | ~~Clinical-row tamper detection~~ — **done**, [ADR-0010](adr/0010-clinical-integrity.md) | Critical | Med |
+| 3 | Anomaly alerting on per-actor PHI access volume | High | Med |
+| 4 | WORM/object-locked backups of `audit_logs` and the integrity journal | High | Low |
+| 5 | Razorpay sandbox verification before go-live | High | Low |
+| 6 | Breached-password check (k-anonymity HIBP API) at registration | Med | Low |
+| 7 | Renovate + SBOM + image signing | Med | Low |
+| 8 | Per-user concurrent-hold cap to blunt slot squatting | Med | Low |
+| 9 | Chaos test: kill Redis mid-booking, assert DB defences hold | Med | Med |
+| 10 | Third-party penetration test | Med | High |
 
 ---
 

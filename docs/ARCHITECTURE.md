@@ -85,7 +85,7 @@ supporting: refresh_tokens · mfa_recovery_codes · idempotency_keys ·
             payment_webhook_events · notifications · encryption_keys · reviews
 ```
 
-21 tables, 33 indexes, 2 materialised views.
+23 tables, 38 indexes, 2 materialised views.
 
 Three schema decisions carry most of the weight:
 
@@ -152,6 +152,14 @@ Local ACID transactions plus compensations, not 2PC: the payment provider is a
 third party that cannot join our transaction, so a distributed commit protocol
 is not available regardless. See [ADR-0004](adr/0004-saga-vs-2pc.md).
 
+A saga abandoned by a *crashed process* cannot compensate itself — the catch
+block never runs. A reconciler sweeps every minute, claims stale sagas with
+`FOR UPDATE SKIP LOCKED`, replays their recorded compensations in reverse, and
+dead-letters whatever it cannot fix rather than retrying forever. It rolls
+back rather than forward: charging a patient for a consultation nobody told
+them about is worse than refunding one who wanted it.
+See [ADR-0011](adr/0011-saga-recovery.md).
+
 A subtle bug the tests caught: the losing racer's compensation was releasing
 the *winner's* hold, because the compensation scoped its release by
 `hold_token` and all racers shared one token. Fixed with an `ownsHold` flag set
@@ -213,14 +221,29 @@ or editing any entry breaks verification from that point forward.
 `GET /admin/audit-logs/verify` walks the chain and reports
 `{verified, checked, brokenAtId?}`.
 
-**Honest limitation.** The chain detects tampering with audit rows, but
-`test/integration/consultation.spec.ts` confirms that direct SQL modification
-of a `prescriptions` row is *not* blocked — the append-only rules cover the
-audit table, not clinical tables. Defending against an attacker with direct
-database write access requires controls outside the application: restricted
-credentials (`0004_grants.sql`), CloudTrail on RDS, and WORM backups. Stating
-this plainly is more useful than implying the hash chain covers more than it
-does.
+**Clinical integrity.** The audit chain covers `audit_logs` and nothing else,
+so a second control covers the clinical tables. Every mutation of
+`consultations`, `prescriptions` and `payments` fires a `SECURITY DEFINER`
+trigger that journals a row digest plus a **proof of application origin** — an
+HMAC token the API presents on each database connection. The key is held by
+the application and KMS, never by the database, so an attacker with full
+database write access cannot mint a valid proof; their write is recorded as
+unattributed, with the database user and client address. A sweep every five
+minutes also catches the evasions that bypass the trigger entirely: rows
+changed while it was disabled, unjournaled inserts, vanished rows, edited
+journal entries, and deleted journal ranges (via chained checkpoints).
+
+`GET /admin/integrity/verify` returns the findings;
+`GET /admin/integrity/history/:table/:rowId` gives an incident responder a
+per-row timeline. Nine tests in `test/integration/integrity.spec.ts` each
+perform the actual attack and assert it is caught.
+
+**What this is and is not.** It is detection, not prevention: nothing here
+stops a privileged write, it makes one impossible to hide. Prevention remains
+the least-privilege grants in `0004_grants.sql` and IAM. The residual risk is
+an attacker who compromises **both** the database and the integrity key —
+which is why the pre-production checklist requires that key to be distinct
+from the encryption master key. See [ADR-0010](adr/0010-clinical-integrity.md).
 
 Full analysis: [SECURITY.md](SECURITY.md) (OWASP Top 10, data classification,
 key rotation) and [THREAT_MODEL.md](THREAT_MODEL.md) (STRIDE, attack surface,
@@ -273,7 +296,7 @@ lines.
 
 - **Metrics** — Prometheus, RED plus domain-specific: `booking_conflicts_total{defence}`,
   `saga_compensations_total{step}`, `idempotency_events_total{outcome}`,
-  `outbox_pending_events`, `circuit_breaker_state`. A 24-panel Grafana
+  `outbox_pending_events`, `circuit_breaker_state`. A 37-panel Grafana
   dashboard is provisioned in `observability/grafana/`.
 - **Logs** — Pino JSON with automatic PHI redaction.
 - **Traces** — OpenTelemetry → OTLP, spanning HTTP, Postgres, Redis and queue jobs.
@@ -306,10 +329,10 @@ the threshold at which a month's budget would be gone in under two days.
 
 ## 8. Testing and CI
 
-**123 tests across 8 suites** — 4 unit specs for pure logic (canonical JSON,
+**163 tests across 11 suites** — 6 unit specs for pure logic (canonical JSON,
 FSM transitions, field encryption, password rules) and 4 integration suites
 (booking 19, auth 21, security 31, consultation 15) that run against **real
-Postgres and Redis**, not mocks. Coverage: ~74% statements, ~78% lines, with
+Postgres and Redis**, not mocks. Coverage: ~78% statements, ~80% lines, with
 floors enforced in CI.
 
 Integration tests use real infrastructure deliberately. The three defects these
@@ -369,3 +392,5 @@ boot/SIGTERM smoke test.
 | [0007](adr/0007-password-hashing.md) | scrypt over bcrypt/argon2 |
 | [0008](adr/0008-canonical-json.md) | Canonical JSON as a hashing invariant |
 | [0009](adr/0009-response-caching.md) | Deny-by-default response caching |
+| [0010](adr/0010-clinical-integrity.md) | Proof-of-origin journal for clinical rows |
+| [0011](adr/0011-saga-recovery.md) | Stuck-saga reconciler |

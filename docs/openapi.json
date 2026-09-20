@@ -1824,6 +1824,169 @@
         ]
       }
     },
+    "/api/v1/admin/integrity/verify": {
+      "get": {
+        "operationId": "IntegrityController_verify",
+        "summary": "Verify clinical-row integrity",
+        "description": "Detects modifications to consultations, prescriptions and payments that did not originate from the application — including writes made with a direct database session, writes made with the capture trigger disabled, and tampering with the journal itself.",
+        "parameters": [
+          {
+            "name": "sinceJournalId",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Integrity report (ok=false when findings exist)"
+          },
+          "403": {
+            "description": "Requires role: admin"
+          }
+        },
+        "tags": [
+          "integrity"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/integrity/checkpoint": {
+      "post": {
+        "operationId": "IntegrityController_checkpoint",
+        "summary": "Seal the journal up to the current head",
+        "description": "Folds all journal entries since the last checkpoint into a chained hash, making any later deletion of those entries detectable.",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": ""
+          },
+          "403": {
+            "description": "Requires role: admin"
+          }
+        },
+        "tags": [
+          "integrity"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/integrity/saga-dead-letters": {
+      "get": {
+        "operationId": "IntegrityController_deadLetters",
+        "summary": "Sagas parked for manual intervention",
+        "description": "Sagas the reconciler could not complete or compensate after the configured number of attempts. Each entry needs a human decision; the runbook has the procedure.",
+        "parameters": [
+          {
+            "name": "limit",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "403": {
+            "description": "Requires role: admin"
+          }
+        },
+        "tags": [
+          "integrity"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/integrity/reconcile-sagas": {
+      "post": {
+        "operationId": "IntegrityController_reconcileNow",
+        "summary": "Force a saga reconciliation pass",
+        "description": "Runs the recovery sweep immediately instead of waiting for the next scheduled pass. Idempotent and safe to call during an incident.",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": ""
+          },
+          "403": {
+            "description": "Requires role: admin"
+          }
+        },
+        "tags": [
+          "integrity"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/integrity/history/{table}/{rowId}": {
+      "get": {
+        "operationId": "IntegrityController_history",
+        "summary": "Mutation history for one clinical row",
+        "description": "Every recorded change to a row, with the database user, client address and whether the write carried a valid proof of application origin.",
+        "parameters": [
+          {
+            "name": "table",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "rowId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "403": {
+            "description": "Requires role: admin"
+          }
+        },
+        "tags": [
+          "integrity"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/healthz": {
       "get": {
         "operationId": "HealthController_liveness",

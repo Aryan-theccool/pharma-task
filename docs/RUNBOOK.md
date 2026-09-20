@@ -229,7 +229,148 @@ but users are not being told things.
 
 ---
 
+## clinical-integrity-violation
+
+**Alert:** `ClinicalIntegrityViolation` · **Severity:** critical · page immediately
+
+Clinical data was modified by something that is not this application. Treat as
+a confirmed breach until you have proven otherwise.
+
+**Do not** start by "fixing" the data. The rows are evidence.
+
+1. **Get the report.**
+   ```bash
+   curl -H "Authorization: Bearer $ADMIN_TOKEN" \
+     https://api.amrutam.example/api/v1/admin/integrity/verify | jq
+   ```
+   Each finding names `table`, `rowId`, `dbUser` and `clientAddr`.
+
+2. **Read the finding kind — it tells you what happened.**
+
+   | Kind | Meaning |
+   | --- | --- |
+   | `unattributed_write` | Someone wrote using a direct database session |
+   | `divergent_row` | A row was changed with the capture trigger disabled |
+   | `unjournaled_row` | A row was inserted while protection was off |
+   | `vanished_row` | A row was deleted while protection was off |
+   | `forged_journal_entry` | The journal itself was edited |
+   | `checkpoint_mismatch` | Journal entries were deleted |
+   | `protection_disabled` | A trigger is off **right now** — fix first |
+
+3. **Get the per-row timeline.**
+   ```bash
+   curl -H "Authorization: Bearer $ADMIN_TOKEN" \
+     ".../api/v1/admin/integrity/history/consultations/$ROW_ID" | jq
+   ```
+   `attributed: false` entries are the intruder's. `dbUser`, `clientAddr` and
+   `transactionId` are your pivot points into the Postgres and CloudTrail logs.
+
+4. **Contain.** Rotate the database credential the attacker used. If
+   `INTEGRITY_PROOF_KEY` may itself be exposed (the finding says
+   `failed verification` rather than absent), rotate that too — a valid-looking
+   proof means they tried to forge attribution.
+
+5. **Scope it.** Correlate `transactionId` in Postgres logs to find every other
+   statement in the same transaction. One reported row is rarely the only one.
+
+6. **Only then restore.** Use a PITR restore to just before the offending
+   transaction. Re-run the sweep afterwards and confirm `ok: true`.
+
+7. **Notify.** Altered clinical records are reportable under most health-data
+   regimes. Involve the DPO before the clock starts.
+
+If `protection_disabled` is the only finding, re-enable it immediately —
+detection is blind until you do:
+
+```sql
+ALTER TABLE consultations ENABLE TRIGGER clinical_integrity_consultations;
+```
+
+---
+
+## stuck-sagas
+
+**Alerts:** `SagasStuck` (warning) · `SagaDeadLettered` (critical)
+
+A saga is mid-flight with no process driving it — usually a pod killed between
+steps. The reconciler runs every minute and normally clears these unaided.
+
+**`SagasStuck` firing for 10+ minutes** means recovery is failing, not pending.
+
+1. Force a pass and read the result:
+   ```bash
+   curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
+     https://api.amrutam.example/api/v1/admin/integrity/reconcile-sagas | jq
+   ```
+2. If `recovered` stays at 0, check `last_error` on the saga rows:
+   ```sql
+   SELECT id, type, step, recovery_attempts, last_error
+     FROM saga_instances
+    WHERE state IN ('running','compensating')
+      AND updated_at < now() - interval '5 minutes';
+   ```
+   A repeated payment-provider error usually means the circuit breaker is open —
+   see [circuit-breaker](#circuit-breaker) first.
+
+**`SagaDeadLettered`** means the reconciler gave up. Each entry is money or
+inventory in an indeterminate state and needs a decision.
+
+```bash
+curl -H "Authorization: Bearer $ADMIN_TOKEN" \
+  https://api.amrutam.example/api/v1/admin/integrity/saga-dead-letters | jq
+```
+
+For each one, establish the true state before acting:
+
+```sql
+-- Did the consultation get created?
+SELECT id, status FROM consultations WHERE slot_id = '<slotId>';
+-- What happened to the money?
+SELECT id, status, amount, refunded_amount FROM payments WHERE booking_ref = '<bookingRef>';
+-- Is the slot still held?
+SELECT id, status, held_until FROM availability_slots WHERE id = '<slotId>';
+```
+
+Then resolve in the patient's favour:
+
+- **Payment captured, no consultation** → refund, release the slot, apologise.
+- **Consultation exists, payment not captured** → capture, or honour the
+  consultation and write it off. Never cancel on the patient silently.
+- **Neither** → release the slot; nothing else to do.
+
+Mark it resolved so it stops paging:
+
+```sql
+UPDATE saga_instances
+   SET state = 'compensated', recovered_at = now(),
+       last_error = 'manually resolved: <ticket>'
+ WHERE id = '<sagaId>';
+```
+
+---
+
 ## Common procedures
+
+### Going live with a real PSP
+
+The Razorpay adapter is contract-tested but has never spoken to Razorpay. Before
+taking real money:
+
+1. Set `PAYMENT_PROVIDER=razorpay`, `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET` and
+   `RAZORPAY_WEBHOOK_SECRET` from Secrets Manager. (The app refuses to boot with
+   `PAYMENT_PROVIDER=mock` when `NODE_ENV=production`.)
+2. Against their **sandbox**, verify each verb end to end: authorize, capture,
+   void an uncaptured authorization, full refund, partial refund.
+3. Replay a request with the same `X-Razorpay-Idempotency` value and confirm the
+   provider returns the original charge rather than creating a second one. This
+   is the one that prevents double-charging on retry.
+4. Point a webhook at `/api/v1/payments/webhook` and confirm: a valid signature
+   is accepted, a tampered body is rejected with 403, and a replayed event is
+   deduplicated rather than double-applied.
+5. Force a 5xx from the sandbox and confirm the circuit breaker opens and the
+   saga compensates cleanly.
+6. Reconcile a day of sandbox traffic against `payments` before switching DNS.
+
 
 ### Verify the audit chain
 

@@ -14,10 +14,10 @@ const { readFileSync, existsSync } = require('node:fs');
 const { join } = require('node:path');
 
 const THRESHOLDS = {
-  statements: 70,
-  branches: 55,
-  functions: 62,
-  lines: 72,
+  statements: 73,
+  branches: 58,
+  functions: 65,
+  lines: 75,
 };
 
 const summaryPath = join(process.cwd(), 'coverage', 'coverage-summary.json');
