@@ -181,7 +181,7 @@ a patient is never left with money held and no appointment.
 **Observability** — RED metrics plus domain metrics
 (`booking_conflicts_total{defence}`, `saga_compensations_total`,
 `outbox_pending_events`), structured logs with PHI redaction, OpenTelemetry
-traces, a 37-panel Grafana dashboard and 17 SLO alert rules.
+traces, a Grafana dashboard of 30 panels across 7 rows, and 17 SLO alert rules.
 
 **Reliability** — transactional outbox (no dual-write window), circuit breaker
 on the payment provider, BullMQ retries, graceful shutdown.
@@ -223,8 +223,8 @@ src/
 └── queue/            BullMQ producers and workers
 
 db/migrations/        7 hand-written SQL migrations (23 tables, 38 indexes, 2 matviews)
-test/unit/            4 specs — pure logic
-test/integration/     4 suites — real Postgres and Redis
+test/unit/            7 specs — pure logic
+test/integration/     5 suites — real Postgres and Redis
 load/                 autocannon suite + measured report
 infra/terraform/      6 modules, dev and prod stacks
 observability/        Prometheus config, alert rules, Grafana dashboards

@@ -296,7 +296,7 @@ lines.
 
 - **Metrics** — Prometheus, RED plus domain-specific: `booking_conflicts_total{defence}`,
   `saga_compensations_total{step}`, `idempotency_events_total{outcome}`,
-  `outbox_pending_events`, `circuit_breaker_state`. A 37-panel Grafana
+  `outbox_pending_events`, `circuit_breaker_state`. A 30-panel (7-row) Grafana
   dashboard is provisioned in `observability/grafana/`.
 - **Logs** — Pino JSON with automatic PHI redaction.
 - **Traces** — OpenTelemetry → OTLP, spanning HTTP, Postgres, Redis and queue jobs.
