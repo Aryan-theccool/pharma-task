@@ -64,8 +64,7 @@ export class JoinTokenService {
     // prescription signing key, which is already required to exist. Distinct
     // HKDF-style info via the HMAC label keeps the two uses separate.
     const material =
-      config.get<string>('JOIN_TOKEN_SECRET') ??
-      config.getOrThrow<string>('PRESCRIPTION_SIGNING_KEY');
+      config.get<string>('JOIN_TOKEN_SECRET') ?? config.getOrThrow<string>('PRESCRIPTION_SIGNING_KEY');
     const isHex = /^[0-9a-f]+$/i.test(material) && material.length % 2 === 0;
     const raw = isHex ? Buffer.from(material, 'hex') : Buffer.from(material, 'utf8');
     this.key = createHmac('sha256', raw).update('amrutam-join-token').digest();

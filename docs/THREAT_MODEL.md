@@ -133,7 +133,7 @@ See [ADR-0010](adr/0010-clinical-integrity.md).
 | **Login flood exhausting CPU via scrypt** | Med / High | 10/min per IP on login; scrypt tuned to ~100 ms | Med |
 | Slot-lock exhaustion (hold and abandon) | Med / Med | 5-min hold TTL; per-user booking limits | Med |
 | Connection-pool exhaustion via a slow PSP | Med / High | Circuit breaker + `statement_timeout` | Low |
-| Redis outage | Low / Med | Rate limiter fails open; booking still has 2 DB defences | Low |
+| Redis outage | Low / Med | Rate limiter fails open **and alerts** (`rate_limit_enforcing`=0); auth denylist and slot lock fail **closed**; caches degrade to Postgres; booking still has 2 DB defences; request-path client has a command timeout so an outage degrades rather than hangs | Low |
 | Unbounded table growth | High / Med | Monthly partitioning; retention by `DETACH PARTITION` | Low |
 
 scrypt is intentionally expensive, which makes the login endpoint the natural

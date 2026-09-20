@@ -241,7 +241,9 @@ export class DoctorsService {
     };
 
     await this.redis.set(cacheKey, result, SEARCH_CACHE_TTL);
-    await this.redis.client.sadd('search:keys', cacheKey);
+    // Best-effort: populating the cache index must not fail a search that has
+    // already produced its answer from Postgres.
+    await this.redis.sAddBestEffort('search:keys', cacheKey);
     return result;
   }
 
@@ -262,12 +264,18 @@ export class DoctorsService {
     };
   }
 
-  /** Tag-based invalidation of the whole search result namespace. */
+  /**
+   * Tag-based invalidation of the whole search result namespace.
+   *
+   * Best-effort throughout: this runs after a committed write, so a Redis
+   * outage must not turn a successful doctor update into a 500. Entries expire
+   * on their TTL regardless.
+   */
   async invalidateSearch(): Promise<void> {
-    const keys = await this.redis.client.smembers('search:keys');
+    const keys = await this.redis.sMembersBestEffort('search:keys');
     if (keys.length) {
-      await this.redis.client.del(...keys);
-      await this.redis.client.del('search:keys');
+      await this.redis.del(...keys);
+      await this.redis.del('search:keys');
     }
   }
 

@@ -20,7 +20,10 @@ import { metrics } from '../observability/metrics';
  */
 @Injectable()
 export class WorkersService implements OnModuleInit, OnModuleDestroy {
+  private static readonly ERROR_LOG_INTERVAL_MS = 30_000;
+
   private readonly logger = new Logger(WorkersService.name);
+  private lastErrorLoggedAt = 0;
   private readonly connection: Redis;
   private readonly workers: Worker[] = [];
   private readonly storageDir: string;
@@ -36,8 +39,20 @@ export class WorkersService implements OnModuleInit, OnModuleDestroy {
       maxRetriesPerRequest: null,
       enableReadyCheck: false,
     });
+    // Without a listener, an 'error' event is rethrown by EventEmitter and
+    // crashes the process — so a Redis restart would kill every worker rather
+    // than have them reconnect. Logged sparsely: reconnect attempts are
+    // continuous during an outage.
+    this.connection.on('error', (err: Error) => this.logConnectionError(err));
     this.storageDir = resolve(config.get<string>('STORAGE_DIR', './storage'));
     this.enabled = config.get<boolean>('RUN_WORKERS_IN_API', true);
+  }
+
+  private logConnectionError(err: Error): void {
+    const now = Date.now();
+    if (now - this.lastErrorLoggedAt < WorkersService.ERROR_LOG_INTERVAL_MS) return;
+    this.lastErrorLoggedAt = now;
+    this.logger.warn(`worker redis connection error: ${err.message}`);
   }
 
   onModuleInit(): void {

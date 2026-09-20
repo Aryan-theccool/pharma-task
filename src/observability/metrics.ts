@@ -76,6 +76,41 @@ class Metrics {
     labelNames: ['scope'] as const,
   });
 
+  /**
+   * Requests served while the limiter was unable to reach Redis.
+   *
+   * The limiter fails open so a Redis outage degrades throttling rather than
+   * the whole platform — but an unenforced security control that emits no
+   * signal is indistinguishable from one that is working. This counter is what
+   * makes the trade-off visible, and it drives RateLimiterFailingOpen.
+   */
+  readonly rateLimitFailOpen = new Counter({
+    name: 'rate_limit_fail_open_total',
+    help: 'Requests allowed through because the rate limiter could not reach Redis',
+    labelNames: ['reason'] as const,
+  });
+
+  /** 1 while the limiter is enforcing, 0 while it is failing open. */
+  readonly rateLimitEnforcing = new Gauge({
+    name: 'rate_limit_enforcing',
+    help: 'Whether the rate limiter is currently enforcing (1) or failing open (0)',
+  });
+
+  /**
+   * Requests rejected because the session-revocation denylist was unreachable.
+   *
+   * Deliberately separate from rateLimitFailOpen: these two Redis failures have
+   * opposite polarity. The limiter fails OPEN (admits traffic, risking abuse);
+   * the denylist fails CLOSED (rejects traffic, risking downtime) because a
+   * revoked session must never be silently honoured. Conflating them in one
+   * metric would hide which way the system is currently erring.
+   */
+  readonly authDenylistUnavailable = new Counter({
+    name: 'auth_denylist_unavailable_total',
+    help: 'Requests rejected because the session revocation denylist was unreachable',
+    labelNames: ['reason'] as const,
+  });
+
   readonly outboxPublished = new Counter({
     name: 'outbox_events_published_total',
     help: 'Outbox events successfully published',
@@ -198,6 +233,9 @@ class Metrics {
       this.integrityLastRunTimestamp,
       this.authEvents,
       this.rateLimitRejections,
+      this.rateLimitFailOpen,
+      this.rateLimitEnforcing,
+      this.authDenylistUnavailable,
       this.outboxPublished,
       this.outboxPending,
       this.queueJobs,

@@ -129,9 +129,7 @@ export class ConsultationsService {
    * rest of the module returns for a consultation that is not theirs.
    */
   async join(id: string, user: JwtPayload) {
-    const res = await this.db.query<ConsultationRow>(`SELECT * FROM consultations WHERE id = $1`, [
-      id,
-    ]);
+    const res = await this.db.query<ConsultationRow>(`SELECT * FROM consultations WHERE id = $1`, [id]);
     const consultation = res.rows[0];
     if (!consultation) throw new NotFoundException({ title: 'Consultation not found' });
     await this.assertAccess(consultation, user, 'read');

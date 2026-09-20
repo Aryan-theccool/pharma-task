@@ -159,8 +159,7 @@ async function main(): Promise<void> {
     hkdfSync(
       'sha256',
       (() => {
-        const m =
-          process.env.INTEGRITY_PROOF_KEY ?? (process.env.ENCRYPTION_MASTER_KEY as string);
+        const m = process.env.INTEGRITY_PROOF_KEY ?? (process.env.ENCRYPTION_MASTER_KEY as string);
         const isHex = /^[0-9a-f]+$/i.test(m) && m.length % 2 === 0;
         return isHex ? Buffer.from(m, 'hex') : Buffer.from(m, 'utf8');
       })(),

@@ -229,6 +229,81 @@ but users are not being told things.
 
 ---
 
+## rate-limiter-failing-open
+
+**Alerts:** `RateLimiterFailingOpen` (critical, `rate_limit_enforcing == 0`) and
+`RateLimiterFailOpenBurst` (warning, sustained `rate_limit_fail_open_total`
+growth).
+
+**What it means:** the rate limiter cannot reach Redis and is **allowing every
+request through unthrottled**. The API is up; the protection in front of it is
+not. Brute-force lockout, per-IP auth throttling and abuse limits are all
+inert for as long as this lasts.
+
+This is a deliberate trade-off — availability over throttling — and it is the
+right default for a clinical platform. What is *not* acceptable is it happening
+quietly, which is why these alerts exist.
+
+1. **Confirm scope.** One task or all of them?
+   ```
+   sum by (task) (rate_limit_enforcing)
+   ```
+   A single task means a network partition for that task; zero across the fleet
+   means ElastiCache itself.
+2. **Check the cluster:**
+   ```bash
+   aws elasticache describe-replication-groups --replication-group-id amrutam-prod \
+     --query 'ReplicationGroups[0].{Status:Status,Nodes:MemberClusters}'
+   ```
+   Also check `CPUUtilization`, `DatabaseMemoryUsagePercentage` and `Evictions`
+   in CloudWatch — memory pressure presents as timeouts before it presents as
+   an outage.
+3. **Assess exposure while unprotected.** The limiter is one layer; the WAF
+   rate limit is still active and account lockout is enforced in Postgres, so
+   credential stuffing is bounded even now. Check for abuse during the window:
+   ```
+   fields @timestamp, req.remoteAddress, path
+   | filter status = 401 or status = 429
+   | stats count() by req.remoteAddress | sort count desc | limit 20
+   ```
+4. **Tighten the WAF** if the outage will be prolonged and traffic looks
+   abusive — it is the only remaining throttle:
+   ```bash
+   aws wafv2 update-web-acl --name amrutam-prod --scope REGIONAL --id <id> \
+     --lock-token <token> --rules file://waf-strict-rate-rules.json
+   ```
+5. **Recovery is automatic.** ioredis reconnects in the background and the
+   guard flips `rate_limit_enforcing` back to 1 on the first successful command
+   — no deploy or restart. Confirm:
+   ```
+   min(rate_limit_enforcing)        # expect 1
+   rate(rate_limit_fail_open_total[5m])   # expect 0
+   ```
+
+**Do not "fix" this by making the limiter fail closed.** A Redis blip would
+then return 429 to every caller, including clinicians mid-consultation. The
+failure mode is intentional; the alert is the control.
+
+**Related, opposite polarity:** `auth_denylist_unavailable_total` counts
+requests *rejected* (503) because the session-revocation denylist was
+unreachable. That check fails **closed** on purpose — an unreadable denylist
+cannot prove a session was not revoked, and a revoked session is precisely what
+an attacker replays. If you see both metrics moving together, Redis is down and
+the system is correctly erring in opposite directions for the two cases:
+admitting unthrottled traffic, refusing unverifiable sessions.
+
+**Why a Redis outage no longer hangs the API:** the request-path client is
+configured with `commandTimeout`, bounded `maxRetriesPerRequest` and
+`enableOfflineQueue: false`. Before that, commands queued indefinitely, so the
+fail-open path was unreachable and requests hung until the client gave up —
+`/healthz` included. If you ever see request latency climb to tens of seconds
+during a Redis incident rather than these alerts firing, check that those
+options are still set in `src/infra/redis.service.ts`. The BullMQ connections
+deliberately keep `maxRetriesPerRequest: null`; blocking queue commands are
+supposed to wait.
+
+---
+
 ## clinical-integrity-violation
 
 **Alert:** `ClinicalIntegrityViolation` · **Severity:** critical · page immediately

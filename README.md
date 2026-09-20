@@ -14,7 +14,7 @@ Drizzle ORM · OpenTelemetry · Prometheus · Docker · Terraform (AWS)
 
 | | |
 | --- | --- |
-| **Tests** | 177 passing across 12 suites — integration runs against real Postgres and Redis |
+| **Tests** | 193 passing across 14 suites — integration runs against real Postgres and Redis |
 | **Coverage** | ~77% statements · ~79% lines (floors enforced in CI) |
 | **API** | 52 paths / 56 operations, OpenAPI 3.0 generated from code |
 | **Load** | 1,910 rps reads at p95 61 ms on 2 shared vCPUs — [report](load/README.md) |
@@ -181,7 +181,7 @@ a patient is never left with money held and no appointment.
 **Observability** — RED metrics plus domain metrics
 (`booking_conflicts_total{defence}`, `saga_compensations_total`,
 `outbox_pending_events`), structured logs with PHI redaction, OpenTelemetry
-traces, a Grafana dashboard of 30 panels across 7 rows, and 17 SLO alert rules.
+traces, a Grafana dashboard of 30 panels across 7 rows, and 19 SLO alert rules.
 
 **Reliability** — transactional outbox (no dual-write window), circuit breaker
 on the payment provider, BullMQ retries, graceful shutdown.
@@ -228,7 +228,7 @@ test/integration/     5 suites — real Postgres and Redis
 load/                 autocannon suite + measured report
 infra/terraform/      6 modules, dev and prod stacks
 observability/        Prometheus config, alert rules, Grafana dashboards
-docs/                 architecture, security, threat model, 11 ADRs, OpenAPI
+docs/                 architecture, security, threat model, 12 ADRs, OpenAPI
 scripts/              migrate, seed, key generation/rotation, demo, OpenAPI generation
 ```
 

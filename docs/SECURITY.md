@@ -132,7 +132,7 @@ refresh token from silent persistent access into a detected, contained event.
 - Structured Pino logs with PHI redaction; `x-request-id` and trace id on every line.
 - `auth_events_total{event,result}` with an alert on failed-login spikes.
 - VPC flow logs, ALB access logs, CloudTrail, RDS `log_connections`.
-- 13 Prometheus alert rules, each linking to a runbook section.
+- 19 Prometheus alert rules, each linking to a runbook section.
 
 ### A10 — Server-Side Request Forgery
 
@@ -259,8 +259,25 @@ grants (`db/migrations/0004_grants.sql`), CloudTrail on RDS, WORM backups.
 Stated plainly, because a security document that claims completeness is a
 security document nobody should trust:
 
-1. **Rate limiter fails open** on a Redis outage — a deliberate
-   availability trade-off; the WAF is the fail-closed backstop.
+1. **Rate limiter fails open** on a Redis outage — a deliberate availability
+   trade-off; the WAF is the fail-closed backstop. It is now **observable**:
+   `rate_limit_enforcing` drops to 0 and `rate_limit_fail_open_total{reason}`
+   counts every unthrottled request, driving the `RateLimiterFailingOpen`
+   (critical) and `RateLimiterFailOpenBurst` (warning) alerts, with the
+   response procedure in
+   [RUNBOOK.md#rate-limiter-failing-open](RUNBOOK.md#rate-limiter-failing-open).
+   The residual gap is the trade-off itself, not the blindness: an unenforced
+   control that emits no signal is indistinguishable from a working one, and
+   that part is fixed.
+
+   Two related failures deliberately go the *other* way. The session-revocation
+   denylist check (`JwtAuthGuard`) fails **closed** with a 503 and counts
+   `auth_denylist_unavailable_total` — an unreadable denylist cannot prove a
+   session was not revoked, and a revoked session is exactly what an attacker
+   replays. The booking slot lock also fails closed, because admitting a
+   booking without the lock risks a double-booked clinician. Availability
+   outranks throttling; it never outranks authentication or clinical
+   correctness.
 2. **Payment adapter is contract-tested, not sandbox-tested.** The Razorpay
    adapter (`src/modules/payments/razorpay.gateway.ts`) implements the
    documented HTTP contract and is asserted by

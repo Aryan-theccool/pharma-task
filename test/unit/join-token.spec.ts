@@ -129,9 +129,7 @@ describe('JoinTokenService', () => {
   });
 
   it('falls back to the prescription signing key when no dedicated secret is set', () => {
-    const fallback = new JoinTokenService(
-      new ConfigService({ PRESCRIPTION_SIGNING_KEY: 'c'.repeat(64) }),
-    );
+    const fallback = new JoinTokenService(new ConfigService({ PRESCRIPTION_SIGNING_KEY: 'c'.repeat(64) }));
     const { token } = fallback.issue(CID, UID, 'host');
     expect(fallback.verify(token, { consultationId: CID, userId: UID }).valid).toBe(true);
     // Distinct key material => the other service cannot verify it.

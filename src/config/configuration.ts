@@ -97,6 +97,14 @@ export const envSchema = z.object({
    * Signs the short-lived capability token returned when a consultation
    * starts. Falls back to PRESCRIPTION_SIGNING_KEY when unset.
    */
+  /**
+   * Request-path Redis timeouts. Deliberately tight: a cache or rate-limit
+   * lookup that takes longer than this is worse than no lookup at all, because
+   * the caller can degrade gracefully but cannot un-spend the latency.
+   */
+  REDIS_COMMAND_TIMEOUT_MS: z.coerce.number().int().positive().default(250),
+  REDIS_CONNECT_TIMEOUT_MS: z.coerce.number().int().positive().default(2_000),
+
   JOIN_TOKEN_SECRET: z.string().min(32).optional(),
   JOIN_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(900),
 

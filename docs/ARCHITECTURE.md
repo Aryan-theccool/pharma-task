@@ -314,7 +314,7 @@ CPU graphs.
 
 | Failure | Behaviour |
 | --- | --- |
-| Redis down | Rate limiter **fails open** (availability over perfect throttling); booking still protected by two DB-level defences; queues pause and resume |
+| Redis down | Per-call-site policy, [ADR-0012](adr/0012-redis-failure-policy.md). Rate limiter **fails open** and alerts within 1m; caches degrade to Postgres reads; session-denylist check and slot lock **fail closed** (503) to protect auth and booking correctness; booking still has two DB-level defences; queues pause and resume. Verified by a live outage drill, not just mocks. |
 | Postgres primary fails | Multi-AZ failover, 60–120 s; `/readyz` pulls tasks from the ALB so no 500s are served |
 | Payment provider down | Circuit breaker opens, saga compensates, hold released, patient sees a clean error rather than a silent charge |
 | Worker crash mid-job | BullMQ retries (5 attempts, exponential); jobs are idempotent |
@@ -329,11 +329,12 @@ the threshold at which a month's budget would be gone in under two days.
 
 ## 8. Testing and CI
 
-**177 tests across 12 suites** — 69 unit tests for pure logic (canonical JSON 9,
+**193 tests across 14 suites** — 85 unit tests for pure logic (canonical JSON 9,
 FSM transitions 6, field encryption 9, integrity proofs 11, join tokens 10,
-password rules 13, Razorpay adapter 11) and 108 integration tests (security 31,
-auth 21, booking 19, consultation 19, integrity 18) that run against **real
-Postgres and Redis**, not mocks. Coverage: ~77% statements, ~79% lines, with
+password rules 8, Razorpay adapter 11, rate-limiter fail-open 6, Redis
+degradation 10) and 108 integration tests (security 31, auth 21, booking 19,
+consultation 19, integrity 18) that run against **real Postgres and Redis**,
+not mocks. Coverage: ~77% statements, ~79% lines, with
 floors enforced in CI.
 
 Integration tests use real infrastructure deliberately. The three defects these
@@ -367,7 +368,7 @@ both runs is what makes that class of decay visible.
 | Decision | Cost | Why anyway |
 | --- | --- | --- |
 | Modular monolith | Whole app scales together | Transactional integrity across booking/payment is worth more than independent scaling at this volume |
-| Rate limiter fails open | A Redis outage removes throttling | Availability outranks throttling; WAF is the fail-closed backstop |
+| Rate limiter fails open | A Redis outage removes throttling | Availability outranks throttling; WAF is the fail-closed backstop, and `rate_limit_enforcing` alerts so the gap is never silent. Authentication and booking locks deliberately fail *closed* instead. |
 | Field encryption | ~40% slower authenticated reads (measured: 1,066 vs 1,910 rps) | A leaked DB credential should not equal a PHI breach |
 | Hold TTL of 5 min | Slots briefly unavailable to others | Prevents payment-flow abandonment from silently losing bookings |
 | Synchronous audit write | Adds latency to every mutation | An audit log that can be lost on crash is not an audit log |
@@ -404,3 +405,4 @@ both runs is what makes that class of decay visible.
 | [0009](adr/0009-response-caching.md) | Deny-by-default response caching |
 | [0010](adr/0010-clinical-integrity.md) | Proof-of-origin journal for clinical rows |
 | [0011](adr/0011-saga-recovery.md) | Stuck-saga reconciler |
+| [0012](adr/0012-redis-failure-policy.md) | Per-call-site Redis failure policy (fail open vs closed) |

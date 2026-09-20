@@ -140,7 +140,7 @@ curl -H "Authorization: Bearer $ADMIN" localhost:3000/api/v1/admin/audit-logs/ve
 > authorised and then reversed, which is a business problem no CPU graph would
 > show. Idempotency outcomes — `replay` proves clients are retrying safely.
 >
-> Thirteen alert rules, all on symptoms rather than causes, each linking to a
+> Nineteen alert rules, all on symptoms rather than causes, each linking to a
 > runbook section. Traces and logs share a request id, so an alert leads to a
 > trace leads to the exact log lines."
 

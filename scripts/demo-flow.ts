@@ -838,9 +838,7 @@ async function main(): Promise<void> {
 const ADMIN_SECRET_CACHE = resolve(__dirname, '..', '.demo-admin-totp');
 
 async function adminSession(): Promise<string | null> {
-  const cached = existsSync(ADMIN_SECRET_CACHE)
-    ? readFileSync(ADMIN_SECRET_CACHE, 'utf8').trim()
-    : null;
+  const cached = existsSync(ADMIN_SECRET_CACHE) ? readFileSync(ADMIN_SECRET_CACHE, 'utf8').trim() : null;
 
   if (cached) {
     const attempt = authenticator.generate(cached);

@@ -135,6 +135,35 @@ groups:
           summary: 'Clients are reusing idempotency keys with different payloads'
           description: 'Usually a client bug: a retry is mutating its payload between attempts.'
 
+      # The limiter fails open on a Redis outage: the platform stays up, but
+      # brute-force and scraping protection is gone while it lasts. That is an
+      # accepted trade-off only for as long as somebody knows it is happening —
+      # so this pages rather than warns. `rate_limit_enforcing` is seeded to 1
+      # at boot, so a fresh process cannot look like an outage.
+      - alert: RateLimiterFailingOpen
+        expr: min(rate_limit_enforcing) == 0
+        for: 1m
+        labels: { severity: critical, domain: security }
+        annotations:
+          summary: 'Rate limiter is FAILING OPEN — requests are not being throttled'
+          description: >-
+            The limiter cannot reach Redis and is allowing every request through.
+            Auth endpoints are unprotected against credential stuffing until this
+            clears. Check Redis health first; the WAF is the only remaining
+            backstop.
+          runbook: 'docs/RUNBOOK.md#rate-limiter-failing-open'
+
+      - alert: RateLimiterFailOpenBurst
+        expr: sum(rate(rate_limit_fail_open_total[5m])) > 1
+        for: 2m
+        labels: { severity: warning, domain: security }
+        annotations:
+          summary: 'Requests are bypassing the rate limiter'
+          description: >-
+            Sustained fail-open events. Even if `rate_limit_enforcing` is
+            flapping back to 1, the limiter is unreliable and throttling cannot
+            be depended on.
+
       # -------------------------------------------------- clinical integrity
       # Any non-zero value here means clinical data was changed by something
       # other than the application. There is no "acceptable rate" of this, so
