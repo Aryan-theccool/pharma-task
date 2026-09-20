@@ -42,6 +42,79 @@ describe('consultations & prescriptions (integration)', () => {
   const asDoctor = (method: 'post' | 'patch' | 'get', path: string) =>
     request(ctx.server)[method](path).set('Authorization', `Bearer ${doctor.token}`);
 
+  describe('join credential', () => {
+    // The endpoint used to return `stub-rtc-token-${consultationId}`. Since the
+    // id travels in URLs, that was a credential anyone could reconstruct for
+    // someone else's live medical consultation.
+    it('issues a host token to the doctor and a guest token to the patient', async () => {
+      const id = await nextConsultation();
+      const started = await asDoctor('post', `/api/v1/consultations/${id}/start`).expect(200);
+
+      expect(started.body.joinToken).toMatch(/^v1\.[\w-]+\.[\w-]+$/);
+      expect(started.body.joinToken).not.toContain(id);
+      expect(Date.parse(started.body.joinTokenExpiresAt)).toBeGreaterThan(Date.now());
+
+      const joined = await request(ctx.server)
+        .post(`/api/v1/consultations/${id}/join`)
+        .set('Authorization', `Bearer ${patient.token}`)
+        .expect(200);
+
+      expect(joined.body).toMatchObject({ role: 'guest', consultationId: id });
+
+      // Bound to this consultation and this user, not just signed.
+      const payload = JSON.parse(
+        Buffer.from(joined.body.joinToken.split('.')[1], 'base64url').toString('utf8'),
+      );
+      expect(payload).toMatchObject({ cid: id, uid: patient.id, role: 'guest' });
+    });
+
+    it('refuses to mint a credential for a consultation that is not live', async () => {
+      const id = await nextConsultation();
+      // Still 'scheduled' — a token now would be valid before the encounter.
+      await request(ctx.server)
+        .post(`/api/v1/consultations/${id}/join`)
+        .set('Authorization', `Bearer ${patient.token}`)
+        .expect(409);
+
+      await asDoctor('post', `/api/v1/consultations/${id}/start`).expect(200);
+      await asDoctor('post', `/api/v1/consultations/${id}/complete`).expect(200);
+
+      // And not afterwards either.
+      await request(ctx.server)
+        .post(`/api/v1/consultations/${id}/join`)
+        .set('Authorization', `Bearer ${patient.token}`)
+        .expect(409);
+    });
+
+    it('does not let an unrelated patient join', async () => {
+      const id = await nextConsultation();
+      await asDoctor('post', `/api/v1/consultations/${id}/start`).expect(200);
+
+      const intruder = await createUser(ctx.server, 'patient');
+      // 404, not 403: a 403 would confirm the consultation exists.
+      await request(ctx.server)
+        .post(`/api/v1/consultations/${id}/join`)
+        .set('Authorization', `Bearer ${intruder.token}`)
+        .expect(404);
+    });
+
+    it('records the join in the audit trail', async () => {
+      const id = await nextConsultation();
+      await asDoctor('post', `/api/v1/consultations/${id}/start`).expect(200);
+      await request(ctx.server)
+        .post(`/api/v1/consultations/${id}/join`)
+        .set('Authorization', `Bearer ${patient.token}`)
+        .expect(200);
+
+      const { rows } = await ctx.db.query<{ n: string }>(
+        `SELECT count(*)::text AS n FROM audit_logs
+          WHERE action = 'consultation.join' AND resource_id = $1`,
+        [id],
+      );
+      expect(Number(rows[0].n)).toBeGreaterThan(0);
+    });
+  });
+
   describe('state machine', () => {
     it('walks the full happy path scheduled → in_progress → completed', async () => {
       const id = await nextConsultation();

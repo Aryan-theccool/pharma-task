@@ -442,6 +442,45 @@
         ]
       }
     },
+    "/api/v1/consultations/{id}/join": {
+      "post": {
+        "operationId": "ConsultationsController_join",
+        "summary": "Get a join credential for the live media session",
+        "description": "Returns a short-lived, signed token bound to this consultation and the calling user. The patient joins as a guest, the treating doctor as the host. Only valid while the consultation is in_progress.",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Token issued."
+          },
+          "403": {
+            "description": "Requires role: doctor | patient | admin"
+          },
+          "404": {
+            "description": "Not found, or not yours."
+          },
+          "409": {
+            "description": "Consultation is not in progress."
+          }
+        },
+        "tags": [
+          "consultations"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/api/v1/consultations/{id}/complete": {
       "post": {
         "operationId": "ConsultationsController_complete",
@@ -1892,7 +1931,7 @@
             "required": true,
             "in": "query",
             "schema": {
-              "type": "number"
+              "type": "string"
             }
           }
         ],
@@ -1965,7 +2004,7 @@
             "required": true,
             "in": "query",
             "schema": {
-              "type": "number"
+              "type": "string"
             }
           }
         ],

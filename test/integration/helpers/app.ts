@@ -164,7 +164,9 @@ export async function createDoctorWithSlots(
     .send({
       dayOfWeek: target.getUTCDay(),
       startTime: '09:00',
-      endTime: '13:00',
+      // A full clinic day, not a morning: the consultation spec consumes one
+      // slot per test and a half-day pool made adding a test a fixture change.
+      endTime: '17:00',
       slotMinutes: 30,
       validFrom: today.toISOString().slice(0, 10),
       timezone: 'Asia/Kolkata',

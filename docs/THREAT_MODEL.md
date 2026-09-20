@@ -157,7 +157,7 @@ from many IPs remains the most plausible DoS vector.
 
 | Surface | Exposure | Hardening |
 | --- | --- | --- |
-| 51 REST paths / 55 operations | Public via ALB | **10 unauthenticated**, the other 45 behind the guard chain |
+| 52 REST paths / 56 operations | Public via ALB | **10 unauthenticated**, the other 47 behind the guard chain |
 | `POST /auth/login` | Unauthenticated | Lockout, rate limit, generic errors, constant-time compare |
 | `POST /auth/register` | Unauthenticated | 5/min per IP, strength rules, role forced |
 | `POST /payments/webhook` | Unauthenticated by design | HMAC over raw body, timestamp window, dedupe |

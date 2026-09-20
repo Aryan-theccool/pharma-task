@@ -3,6 +3,7 @@ import { Client } from 'pg';
 import { createHmac, hkdfSync, randomBytes, createCipheriv, scryptSync } from 'node:crypto';
 import { DateTime } from 'luxon';
 import { loadEnv } from './load-env';
+import { mintProof, proofConnectionOptions } from '../src/common/crypto/integrity-proof';
 
 /**
  * Deterministic demo dataset:
@@ -117,10 +118,44 @@ async function main(): Promise<void> {
   const emailHash = (email: string) =>
     createHmac('sha256', emailKey).update(email.trim().toLowerCase()).digest();
 
-  const client = new Client({ connectionString: process.env.DATABASE_URL });
+  // Seed writes are attributed, exactly like the API's. The capture triggers
+  // copy this token into every journal entry, so the demo dataset does not
+  // masquerade as an unattributed (i.e. suspicious) write. Derivation matches
+  // integrityKeyFrom() in src/infra/database.service.ts.
+  const integrityKey = Buffer.from(
+    hkdfSync(
+      'sha256',
+      (() => {
+        const m =
+          process.env.INTEGRITY_PROOF_KEY ?? (process.env.ENCRYPTION_MASTER_KEY as string);
+        const isHex = /^[0-9a-f]+$/i.test(m) && m.length % 2 === 0;
+        return isHex ? Buffer.from(m, 'hex') : Buffer.from(m, 'utf8');
+      })(),
+      Buffer.alloc(0),
+      Buffer.from('amrutam-integrity'),
+      32,
+    ),
+  );
+
+  const client = new Client({
+    connectionString: process.env.DATABASE_URL,
+    application_name: 'amrutam-seed',
+    options: proofConnectionOptions(mintProof(integrityKey)),
+  });
   await client.connect();
 
   console.log('seeding…');
+
+  // The journal is append-only and survives the TRUNCATE below. Entries that
+  // referred to the previous dataset would otherwise be reported for ever as
+  // `vanished_row` — a permanent false positive that makes the whole control
+  // untrustworthy. Re-seeding is a destructive development action, so the
+  // honest thing is to reset the journal with it, under an explicit guard.
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('refusing to seed (and reset the integrity journal) in production');
+  }
+  await client.query('TRUNCATE clinical_integrity_journal, integrity_checkpoints RESTART IDENTITY');
+
   await client.query(`TRUNCATE
     notifications, processed_events, outbox, saga_instances, payment_webhook_events, payments,
     prescriptions, consultations, availability_slots, availability_rules, reviews, doctors,
@@ -316,6 +351,24 @@ async function main(): Promise<void> {
 
   await client.query('REFRESH MATERIALIZED VIEW mv_daily_kpis');
   await client.query('REFRESH MATERIALIZED VIEW mv_doctor_utilization');
+
+  // Attest the seeded rows against the clinical integrity journal.
+  //
+  // The journal triggers record every write, but seed rows are inserted
+  // without a proof token, so they land as `unattributed_write`. Without this
+  // step a freshly seeded environment boots straight into a red
+  // "CLINICAL INTEGRITY VIOLATION" — which is exactly how you teach an
+  // operator to ignore that alert. Marking the seed as the known-good
+  // starting point means any finding afterwards is a real one.
+  const baseline = await client.query<{ table_name: string; rows_baselined: string }>(
+    'SELECT * FROM integrity_baseline()',
+  );
+  const attested = baseline.rows.reduce((sum, r) => sum + Number(r.rows_baselined), 0);
+  console.log(
+    attested === 0
+      ? `· integrity journal clean (${baseline.rowCount} protected tables, all writes attributed)`
+      : `· integrity baseline: ${attested} pre-existing rows attested`,
+  );
 
   await client.end();
 

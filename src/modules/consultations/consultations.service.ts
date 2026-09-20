@@ -3,6 +3,7 @@ import { DatabaseService } from '../../infra/database.service';
 import { FieldEncryptionService } from '../../common/crypto/field-encryption.service';
 import { AuditService } from '../audit/audit.service';
 import { OutboxService } from '../../common/outbox/outbox.service';
+import { JoinTokenService } from './join-token.service';
 import type { JwtPayload } from '../../common/types/authenticated-request';
 
 export type ConsultationStatus = 'scheduled' | 'in_progress' | 'completed' | 'no_show' | 'cancelled';
@@ -47,6 +48,7 @@ export class ConsultationsService {
     private readonly crypto: FieldEncryptionService,
     private readonly audit: AuditService,
     private readonly outbox: OutboxService,
+    private readonly joinTokens: JoinTokenService,
   ) {}
 
   async findById(id: string, user: JwtPayload) {
@@ -108,8 +110,64 @@ export class ConsultationsService {
           WHERE id = $1`,
         [consultation.id],
       );
-      return { joinToken: `stub-rtc-token-${consultation.id}` };
+      // A signed, short-lived capability bound to this consultation AND this
+      // user. Previously this returned `stub-rtc-token-${id}`, which anyone
+      // holding the consultation id could reconstruct — and the id is not a
+      // secret. The doctor starting the session is the media host.
+      const issued = this.joinTokens.issue(consultation.id, user.sub, 'host');
+      return { joinToken: issued.token, joinTokenExpiresAt: issued.expiresAt };
     });
+  }
+
+  /**
+   * Issue a join credential for the live media session.
+   *
+   * `start` is doctor-only, so without this the patient would have no way to
+   * obtain a token for their own appointment. Access reuses `assertAccess` in
+   * read mode, which means a patient may join their own consultation, the
+   * treating doctor may join theirs, and everyone else gets the same 404 the
+   * rest of the module returns for a consultation that is not theirs.
+   */
+  async join(id: string, user: JwtPayload) {
+    const res = await this.db.query<ConsultationRow>(`SELECT * FROM consultations WHERE id = $1`, [
+      id,
+    ]);
+    const consultation = res.rows[0];
+    if (!consultation) throw new NotFoundException({ title: 'Consultation not found' });
+    await this.assertAccess(consultation, user, 'read');
+
+    // A token is only useful while the encounter is live; minting one for a
+    // completed or cancelled consultation would leave a valid credential
+    // lying around for a room nobody should re-enter.
+    if (consultation.status !== 'in_progress') {
+      throw new ConflictException({
+        title: 'Consultation is not in progress',
+        detail: `Cannot join a consultation in state '${consultation.status}'.`,
+      });
+    }
+
+    // The treating doctor publishes; the patient joins as a guest. The media
+    // server enforces the distinction — this only asserts it.
+    const role = consultation.patient_id === user.sub ? 'guest' : 'host';
+    const issued = this.joinTokens.issue(consultation.id, user.sub, role);
+
+    // Joining a live clinical encounter is a PHI access event.
+    await this.audit.record({
+      actorId: user.sub,
+      actorRole: user.role,
+      action: 'consultation.join',
+      resourceType: 'consultation',
+      resourceId: consultation.id,
+      outcome: 'success',
+      after: { role },
+    });
+
+    return {
+      joinToken: issued.token,
+      expiresAt: issued.expiresAt,
+      role,
+      consultationId: consultation.id,
+    };
   }
 
   async complete(id: string, user: JwtPayload) {

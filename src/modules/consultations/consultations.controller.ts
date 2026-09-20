@@ -1,5 +1,5 @@
 import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { ConsultationsService } from './consultations.service';
 import { ListConsultationsQuery, UpdateNotesDto } from './dto/consultations.dto';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -38,6 +38,23 @@ export class ConsultationsController {
   @ApiOperation({ summary: 'Start the consultation (scheduled → in_progress)' })
   start(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: JwtPayload) {
     return this.consultations.start(id, user);
+  }
+
+  @Post(':id/join')
+  @HttpCode(200)
+  @Roles('doctor', 'patient', 'admin')
+  @ApiOperation({
+    summary: 'Get a join credential for the live media session',
+    description:
+      'Returns a short-lived, signed token bound to this consultation and the calling user. ' +
+      'The patient joins as a guest, the treating doctor as the host. Only valid while the ' +
+      'consultation is in_progress.',
+  })
+  @ApiResponse({ status: 200, description: 'Token issued.' })
+  @ApiResponse({ status: 409, description: 'Consultation is not in progress.' })
+  @ApiResponse({ status: 404, description: 'Not found, or not yours.' })
+  join(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: JwtPayload) {
+    return this.consultations.join(id, user);
   }
 
   @Post(':id/complete')

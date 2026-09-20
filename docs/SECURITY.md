@@ -19,10 +19,22 @@ complete one that is not.
 | Role escalation blocked at registration | `role` forced to `patient` unless explicitly `doctor`; `admin` never self-assignable | `auth.spec.ts` |
 | Step-up MFA for destructive actions | `@RequireMfa()` on PII erasure, MFA disable | `security.spec.ts` |
 | Deny-by-default response caching | `CacheControlInterceptor`, first in the chain | `security.spec.ts` |
+| Consultation join credential is unforgeable | `JoinTokenService` — HMAC-SHA256, bound to consultation **and** user, 15-minute TTL | `join-token.spec.ts`, `consultation.spec.ts` |
 
 Returning **404 for a resource owned by someone else** is deliberate: a 403
 confirms the id exists, which turns id enumeration into a patient-census
 oracle.
+
+The join credential deserves a note, because it was the one place the pattern
+broke. `POST /consultations/:id/start` previously returned
+`stub-rtc-token-${consultationId}` — a string anyone could reconstruct, since
+consultation ids travel in URLs and appear in the patient's own listings. That
+made the token a public identifier rather than a credential: learning an id was
+enough to join a stranger's live medical consultation. It is now a signed
+capability (`v1.<payload>.<hmac>`) carrying `{cid, uid, role, exp, nonce}`,
+which means a token is useless in another room, useless to another account, and
+useless after fifteen minutes. Tokens are only minted while the consultation is
+`in_progress`, so none exists before or after the encounter.
 
 ### A02 — Cryptographic Failures
 
@@ -75,8 +87,19 @@ patches.
 - **CodeQL** static analysis on every push.
 - **Gitleaks** blocks committed secrets.
 - ECR scan-on-push as a second opinion.
-- **Gap:** no automated dependency-update bot. Renovate or Dependabot should be
-  enabled — scanning finds vulnerabilities but nothing currently opens the PR.
+- **Renovate** (`renovate.json`) opens the update PRs, so scanning is no longer
+  a detector with nobody to act on it. Vulnerability alerts bypass the weekly
+  schedule; dev-dependency patches auto-merge; anything touching auth, crypto,
+  `pg`, `bullmq` or the queue is labelled `needs-security-review` and never
+  auto-merges. GitHub Actions are pinned to digests, because a mutable tag means
+  the action you reviewed is not necessarily the action that runs.
+- **SBOM + provenance** (`supply-chain` CI job): syft emits a CycloneDX SBOM,
+  grype fails the build on a `high` finding, and cosign signs the image and
+  attaches the SBOM as an attestation. Signing is keyless — the signature is
+  bound to the workflow's OIDC identity and logged in Rekor, so there is no
+  long-lived signing key to steal.
+- **Residual gap:** Renovate must still be enabled on the repository, and the
+  signing step only runs once the workflow is active on `main`.
 
 ### A07 — Identification and Authentication Failures
 
@@ -157,6 +180,7 @@ adds a version; `encryption_keys` tracks status.
 | Field-encryption master | Annual or on suspicion | `npm run keys:rotate`, version bump |
 | JWT access/refresh secrets | Quarterly | Secrets Manager + rolling restart |
 | Prescription signing key | Annual | Versioned; old signatures stay verifiable |
+| Consultation join-token secret | Quarterly | `JOIN_TOKEN_SECRET`; 15-minute TTL means a rotation drains in minutes with no coordination |
 | Redis AUTH token | Annual | Terraform var + replication-group update |
 | RDS master password | 30 days | `manage_master_user_password` (automatic) |
 
@@ -193,9 +217,11 @@ grants (`db/migrations/0004_grants.sql`), CloudTrail on RDS, WORM backups.
 | Gitleaks | Implemented |
 | Lockfile committed, `npm ci` | Implemented |
 | Multi-stage build, no toolchain in runtime | Implemented |
-| Automated dependency PRs | **Gap** — enable Renovate |
-| SBOM generation | **Gap** — add `syft` to the docker job |
-| Image signing (cosign) | **Gap** |
+| Automated dependency PRs | Configured (`renovate.json`) — enable the app on the repo |
+| SBOM generation (syft, CycloneDX) | Implemented — `supply-chain` job |
+| SBOM vulnerability scan (grype) | Implemented — fails at `high` |
+| Image signing (keyless cosign + Rekor) | Implemented — runs on `main` |
+| GitHub Actions pinned to digests | Enforced by Renovate `pinDigests` |
 
 ---
 
@@ -210,7 +236,11 @@ grants (`db/migrations/0004_grants.sql`), CloudTrail on RDS, WORM backups.
 - [ ] Restore a backup into a scratch environment and verify the audit chain
 - [ ] Penetration test
 - [ ] Sign a BAA with AWS before real PHI is stored
-- [ ] Enable Renovate, SBOM, image signing
+- [x] Renovate, SBOM and image signing configured — `renovate.json` plus the
+      `supply-chain` CI job (syft CycloneDX SBOM, grype scan at `high`, keyless
+      cosign signature + SBOM attestation). Renovate still needs **enabling on
+      the repository** in the GitHub UI, and cosign signing only runs on pushes
+      to `main`, which requires the workflow to be activated first
 - [ ] Set `INTEGRITY_PROOF_KEY` to a dedicated KMS key, **separate from
       `ENCRYPTION_MASTER_KEY`** — sharing them means one leak defeats both
       confidentiality and tamper detection

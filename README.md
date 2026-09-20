@@ -14,9 +14,9 @@ Drizzle ORM · OpenTelemetry · Prometheus · Docker · Terraform (AWS)
 
 | | |
 | --- | --- |
-| **Tests** | 163 passing across 11 suites — integration runs against real Postgres and Redis |
-| **Coverage** | ~78% statements · ~80% lines (floors enforced in CI) |
-| **API** | 51 paths / 55 operations, OpenAPI 3.0 generated from code |
+| **Tests** | 177 passing across 12 suites — integration runs against real Postgres and Redis |
+| **Coverage** | ~77% statements · ~79% lines (floors enforced in CI) |
+| **API** | 52 paths / 56 operations, OpenAPI 3.0 generated from code |
 | **Load** | 1,910 rps reads at p95 61 ms on 2 shared vCPUs — [report](load/README.md) |
 | **Concurrency** | 19,912 simultaneous bookings on one slot → exactly **1 success, 19,911 clean 409s** |
 

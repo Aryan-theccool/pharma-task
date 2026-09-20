@@ -329,10 +329,11 @@ the threshold at which a month's budget would be gone in under two days.
 
 ## 8. Testing and CI
 
-**163 tests across 11 suites** — 6 unit specs for pure logic (canonical JSON,
-FSM transitions, field encryption, password rules) and 4 integration suites
-(booking 19, auth 21, security 31, consultation 15) that run against **real
-Postgres and Redis**, not mocks. Coverage: ~78% statements, ~80% lines, with
+**177 tests across 12 suites** — 69 unit tests for pure logic (canonical JSON 9,
+FSM transitions 6, field encryption 9, integrity proofs 11, join tokens 10,
+password rules 13, Razorpay adapter 11) and 108 integration tests (security 31,
+auth 21, booking 19, consultation 19, integrity 18) that run against **real
+Postgres and Redis**, not mocks. Coverage: ~77% statements, ~79% lines, with
 floors enforced in CI.
 
 Integration tests use real infrastructure deliberately. The three defects these

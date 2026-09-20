@@ -93,6 +93,13 @@ export const envSchema = z.object({
    * Which payment adapter to bind. `mock` is rejected at boot when
    * NODE_ENV=production — see PaymentsModule.
    */
+  /**
+   * Signs the short-lived capability token returned when a consultation
+   * starts. Falls back to PRESCRIPTION_SIGNING_KEY when unset.
+   */
+  JOIN_TOKEN_SECRET: z.string().min(32).optional(),
+  JOIN_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(900),
+
   PAYMENT_PROVIDER: z.enum(['mock', 'razorpay']).default('mock'),
   PAYMENT_TIMEOUT_MS: z.coerce.number().int().positive().default(5_000),
   RAZORPAY_BASE_URL: z.string().default('https://api.razorpay.com'),

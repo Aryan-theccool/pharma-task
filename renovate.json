@@ -1,0 +1,79 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", ":dependencyDashboard", ":semanticCommits"],
+  "timezone": "Asia/Kolkata",
+  "schedule": ["before 6am on monday"],
+  "labels": ["dependencies"],
+  "prConcurrentLimit": 5,
+  "prHourlyLimit": 2,
+  "rangeStrategy": "bump",
+  "postUpdateOptions": ["npmDedupe"],
+  "vulnerabilityAlerts": {
+    "description": "Security fixes bypass the weekly schedule and the concurrency cap — a known-exploitable dependency should not wait for Monday.",
+    "enabled": true,
+    "schedule": ["at any time"],
+    "prPriority": 10,
+    "labels": ["dependencies", "security"]
+  },
+  "osvVulnerabilityAlerts": true,
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": ["before 6am on the first day of the month"]
+  },
+  "packageRules": [
+    {
+      "description": "Batch low-risk dev tooling: individually reviewing a prettier patch bump is noise that trains reviewers to rubber-stamp.",
+      "matchDepTypes": ["devDependencies"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "dev dependencies",
+      "automerge": true,
+      "automergeType": "branch"
+    },
+    {
+      "description": "Runtime patch updates are grouped but never auto-merged: CI green is necessary, not sufficient, for something that will handle PHI.",
+      "matchDepTypes": ["dependencies"],
+      "matchUpdateTypes": ["patch"],
+      "groupName": "runtime patch updates",
+      "automerge": false
+    },
+    {
+      "description": "NestJS ships its packages in lockstep; splitting them across PRs produces a temporarily uninstallable tree.",
+      "matchPackagePatterns": ["^@nestjs/"],
+      "groupName": "nestjs"
+    },
+    {
+      "description": "OpenTelemetry packages are equally interdependent and pre-1.0 in places.",
+      "matchPackagePatterns": ["^@opentelemetry/"],
+      "groupName": "opentelemetry"
+    },
+    {
+      "description": "Anything touching authentication, cryptography, the database driver or the queue gets reviewed individually — a silent break here is a security incident, not a build failure.",
+      "matchPackageNames": [
+        "pg",
+        "ioredis",
+        "bullmq",
+        "otplib",
+        "helmet",
+        "drizzle-orm",
+        "@nestjs/jwt",
+        "zod"
+      ],
+      "matchUpdateTypes": ["major", "minor", "patch"],
+      "automerge": false,
+      "labels": ["dependencies", "needs-security-review"],
+      "prPriority": 5
+    },
+    {
+      "description": "Node major upgrades change the runtime under everything and must be deliberate.",
+      "matchPackageNames": ["node", "@types/node"],
+      "matchUpdateTypes": ["major"],
+      "automerge": false,
+      "labels": ["dependencies", "runtime"]
+    },
+    {
+      "description": "Pin GitHub Actions to a digest. A mutable tag is a supply-chain hole: the action you reviewed is not necessarily the action that runs.",
+      "matchManagers": ["github-actions"],
+      "pinDigests": true
+    }
+  ]
+}
