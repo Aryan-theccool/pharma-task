@@ -42,3 +42,6 @@ override.tf.json
 terraform.rc
 tfplan
 *.tfplan
+
+# Cached TOTP secret for the seeded demo admin (local only; see scripts/demo-flow.ts)
+.demo-admin-totp

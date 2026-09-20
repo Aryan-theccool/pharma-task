@@ -1,5 +1,7 @@
 /* eslint-disable no-console */
 import { createHmac, randomUUID } from 'node:crypto';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { authenticator } from 'otplib';
 import { loadEnv } from './load-env';
 
@@ -88,6 +90,25 @@ async function call<T = any>(
  * keeps later assertions meaningful — it is a harness concern, never something
  * the application itself does.
  */
+/**
+ * A TOTP code that has not already been spent.
+ *
+ * Codes are single-use (replay is blocked server-side), so a step-up login
+ * issued in the same 30-second window as the enrolment it follows is rejected
+ * as invalid — which looks exactly like a wrong secret. Wait for the step to
+ * advance instead of guessing.
+ */
+async function freshTotp(secret: string, previous?: string): Promise<string> {
+  const spent = previous ?? authenticator.generate(secret);
+  const deadline = Date.now() + 35_000;
+  for (;;) {
+    const candidate = authenticator.generate(secret);
+    if (candidate !== spent) return candidate;
+    if (Date.now() > deadline) throw new Error('TOTP step did not advance within 35s');
+    await new Promise((r) => setTimeout(r, 1_000));
+  }
+}
+
 async function clearRateLimits(): Promise<void> {
   const { default: Redis } = await import('ioredis');
   const redis = new Redis(process.env.REDIS_URL!, { maxRetriesPerRequest: null });
@@ -113,25 +134,54 @@ function check(condition: boolean, whenTrue: string, whenFalse: string): void {
   }
 }
 
+/**
+ * Turn a 429 into an explanation.
+ *
+ * Step 17 deliberately trips the per-IP auth throttle, so a second
+ * `npm run demo` inside the same window fails here. Without this the failure
+ * surfaces several frames later inside otplib as "first argument must be of
+ * type string", which gives the reader nothing to act on.
+ */
+function assertNotThrottled(res: { status: number; headers?: Headers }, what: string): void {
+  if (res.status !== 429) return;
+  const retry = res.headers?.get('retry-after') ?? 'about 60';
+  throw new Error(
+    `${what} was rate-limited (429). A previous demo run tripped the per-IP auth ` +
+      `throttle — this is the rate limiter working, not a broken demo. Wait ${retry}s ` +
+      `and re-run, or clear it with:\n` +
+      `  redis-cli -u "$REDIS_URL" --scan --pattern 'rl:*' | xargs -r redis-cli -u "$REDIS_URL" del`,
+  );
+}
+
 /** Register an account, enrol TOTP and return a fully step-up-authenticated session. */
 async function provision(role: 'patient' | 'doctor', label: string) {
   const email = `demo-${label}-${RUN}@amrutam.test`;
   const reg = await call('POST', '/auth/register', {
     body: { email, password: PASSWORD, fullName: `Demo ${label} ${RUN}`, role },
   });
+  assertNotThrottled(reg, `register ${label}`);
   if (reg.status !== 201)
     throw new Error(`register ${label} failed: ${reg.status} ${JSON.stringify(reg.body)}`);
 
   const login = await call('POST', '/auth/login', { body: { email, password: PASSWORD } });
+  assertNotThrottled(login, `login ${label}`);
+  if (login.status !== 200)
+    throw new Error(`login ${label} failed: ${login.status} ${JSON.stringify(login.body)}`);
   let token = login.body.accessToken as string;
 
   const enroll = await call('POST', '/auth/mfa/enroll', { token });
+  assertNotThrottled(enroll, `mfa enrol ${label}`);
+  if (enroll.status !== 201 && enroll.status !== 200)
+    throw new Error(`mfa enrol ${label} failed: ${enroll.status} ${JSON.stringify(enroll.body)}`);
   const secret = enroll.body.secret as string;
-  await call('POST', '/auth/mfa/verify', { token, body: { code: authenticator.generate(secret) } });
+  const verifyCode = authenticator.generate(secret);
+  await call('POST', '/auth/mfa/verify', { token, body: { code: verifyCode } });
 
-  // TOTP codes are single-use; wait out the 30s step if we'd reuse the same one.
+  // TOTP codes are single-use, so the step-up must not reuse the code that
+  // enrolment just spent. The comment used to promise this; the code merely
+  // regenerated the same digits and relied on the step happening to roll over.
   const stepUp = await call('POST', '/auth/login', {
-    body: { email, password: PASSWORD, totp: authenticator.generate(secret) },
+    body: { email, password: PASSWORD, totp: await freshTotp(secret, verifyCode) },
   });
   token = (stepUp.body.accessToken as string) ?? token;
 
@@ -407,11 +457,40 @@ async function main(): Promise<void> {
 
   // ------------------------------------------------- 8. consultation flow
   bold('8 · Consultation state machine');
-  expect(
-    'scheduled → in_progress',
-    (await call('POST', `/consultations/${consultationId}/start`, { token: doctor.token })).status,
-    200,
+  const joinBeforeStart = await call('POST', `/consultations/${consultationId}/join`, {
+    token: patient.token,
+  });
+  expect('no join credential before the encounter is live', joinBeforeStart.status, 409);
+
+  const startRes = await call('POST', `/consultations/${consultationId}/start`, {
+    token: doctor.token,
+  });
+  expect('scheduled → in_progress', startRes.status, 200);
+
+  // The join credential used to be `stub-rtc-token-${consultationId}` — a value
+  // anyone holding the id could reconstruct. It is now a signed capability.
+  const hostToken = String((startRes.body as { joinToken?: string }).joinToken ?? '');
+  check(
+    /^v1\.[\w-]+\.[\w-]+$/.test(hostToken) && !hostToken.includes(consultationId),
+    'doctor receives a signed join credential that does not embed the consultation id',
+    'join credential is missing, malformed, or leaks the consultation id',
   );
+
+  const patientJoin = await call('POST', `/consultations/${consultationId}/join`, {
+    token: patient.token,
+  });
+  expect('patient joins their own live consultation', patientJoin.status, 200);
+
+  const joinBody = patientJoin.body as { joinToken?: string; role?: string };
+  const claims = JSON.parse(
+    Buffer.from(String(joinBody.joinToken).split('.')[1], 'base64url').toString('utf8'),
+  ) as { cid: string; uid: string; role: string; exp: number };
+  check(
+    claims.cid === consultationId && claims.uid === patient.userId && claims.role === 'guest',
+    `join credential is bound to this consultation and this patient (role=${claims.role}, ttl=${claims.exp - Math.floor(Date.now() / 1000)}s)`,
+    'join credential is not bound to the expected subject',
+  );
+
   expect(
     'in_progress → in_progress (illegal transition)',
     (await call('POST', `/consultations/${consultationId}/start`, { token: doctor.token })).status,
@@ -583,6 +662,12 @@ async function main(): Promise<void> {
       (await call('GET', '/admin/analytics/overview', { token: adminNoMfa.body.accessToken })).status,
       403,
     );
+  } else {
+    // Only provable on a freshly seeded database: once section 15 enrols the
+    // admin in MFA, a password-only login no longer succeeds, so there is no
+    // un-stepped-up admin token to test with. Announce the skip — a check that
+    // quietly disappears is how a suite starts asserting less than it claims.
+    info('skipped "admin without step-up MFA": admin already enrolled (run `npm run seed` to restore)');
   }
 
   // ------------------------------------------------------ 12. cancellation
@@ -723,6 +808,11 @@ async function main(): Promise<void> {
   }
   check(last === 429, 'credential stuffing throttled with 429 + Retry-After', `expected 429, got ${last}`);
 
+  // Leave the throttle as we found it. This check exists to prove the limiter
+  // works, not to lock the next `npm run demo` out of the API for four minutes
+  // — a demo that cannot be run twice in a row is a demo nobody trusts.
+  await clearRateLimits();
+
   console.log(
     `\n\x1b[1mSummary\x1b[0m  \x1b[32m${passed} passed\x1b[0m` +
       (failed ? `, \x1b[31m${failed} failed\x1b[0m` : '') +
@@ -732,23 +822,83 @@ async function main(): Promise<void> {
 }
 
 /** Log the seeded admin in, enrolling MFA on first run so step-up routes work. */
+/**
+ * A step-up-authenticated admin session.
+ *
+ * The admin is seeded, not registered, and administrators are deliberately
+ * forbidden from disabling MFA — so the first run enrols a TOTP secret that
+ * every later run must reuse. Previously the secret was discarded, the second
+ * run could not log in, and sections 15 and 16 silently vanished: the demo
+ * still printed "passed" while quietly asserting seven fewer things. Caching
+ * the secret next to the run makes the demo idempotent.
+ *
+ * The file holds a credential for a local demo account, so it is written
+ * 0600 and lives in .gitignore.
+ */
+const ADMIN_SECRET_CACHE = resolve(__dirname, '..', '.demo-admin-totp');
+
 async function adminSession(): Promise<string | null> {
+  const cached = existsSync(ADMIN_SECRET_CACHE)
+    ? readFileSync(ADMIN_SECRET_CACHE, 'utf8').trim()
+    : null;
+
+  if (cached) {
+    const attempt = authenticator.generate(cached);
+    let stepUp = await call('POST', '/auth/login', {
+      body: { email: 'admin@amrutam.test', password: PASSWORD, totp: attempt },
+    });
+
+    // A rejected code usually means this 30-second code was already spent by
+    // the previous run, not that the secret is wrong. Distinguish the two by
+    // retrying once on the next step before giving up on the cache.
+    if (stepUp.status !== 200) {
+      stepUp = await call('POST', '/auth/login', {
+        body: {
+          email: 'admin@amrutam.test',
+          password: PASSWORD,
+          totp: await freshTotp(cached, attempt),
+        },
+      });
+    }
+    if (stepUp.status === 200) return (stepUp.body.accessToken as string) ?? null;
+
+    // Genuinely stale: the database was re-seeded under us.
+    rmSync(ADMIN_SECRET_CACHE, { force: true });
+  }
+
   const login = await call('POST', '/auth/login', {
     body: { email: 'admin@amrutam.test', password: PASSWORD },
   });
+  // Section 17 runs last precisely so the throttle it trips cannot starve the
+  // checks above — but the admin login still shares the per-IP bucket with the
+  // patient and doctor provisioning above. Say so, rather than skipping seven
+  // assertions with a message about MFA that would be untrue.
+  assertNotThrottled(login, 'admin login');
   if (login.status !== 200) {
-    info('admin already has MFA enabled from an earlier run — skipping admin checks');
+    info(
+      'admin has MFA enabled but its TOTP secret is unknown — re-run `npm run seed` ' +
+        'to reset the admin account, then re-run the demo',
+    );
     return null;
   }
+
   const enroll = await call('POST', '/auth/mfa/enroll', { token: login.body.accessToken });
-  if (enroll.status !== 200) return null;
+  assertNotThrottled(enroll, 'admin mfa enrol');
+  if (enroll.status !== 200 && enroll.status !== 201) return null;
   const secret = enroll.body.secret as string;
+  const verifyCode = authenticator.generate(secret);
   await call('POST', '/auth/mfa/verify', {
     token: login.body.accessToken,
-    body: { code: authenticator.generate(secret) },
+    body: { code: verifyCode },
   });
+  writeFileSync(ADMIN_SECRET_CACHE, secret, { mode: 0o600 });
+
   const stepUp = await call('POST', '/auth/login', {
-    body: { email: 'admin@amrutam.test', password: PASSWORD, totp: authenticator.generate(secret) },
+    body: {
+      email: 'admin@amrutam.test',
+      password: PASSWORD,
+      totp: await freshTotp(secret, verifyCode),
+    },
   });
   return (stepUp.body.accessToken as string) ?? null;
 }

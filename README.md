@@ -102,9 +102,16 @@ npm run demo
 ```
 
 Walks the whole platform — register, MFA, doctor onboarding, availability
-materialisation, search, hold, confirm, consultation lifecycle, prescription
-signing, refund, audit verification — and asserts **64 invariants** along the
-way, including a genuine concurrent-booking race.
+materialisation, search, hold, confirm, consultation lifecycle, join
+credentials, prescription signing, refund, audit verification — and asserts
+**68 invariants** along the way, including a genuine concurrent-booking race.
+
+It is re-runnable: the script clears the rate limits its own throttling check
+trips, and caches the seeded admin's TOTP secret in `.demo-admin-totp`
+(gitignored, 0600) because administrators deliberately cannot disable MFA. One
+assertion — that an admin *without* step-up MFA is refused analytics — can only
+be made on a freshly seeded database, and the run says so explicitly rather than
+quietly dropping it, so the count is 68 after `npm run seed` and 67 thereafter.
 
 ### Prove the booking concurrency
 
@@ -178,6 +185,29 @@ traces, a 37-panel Grafana dashboard and 17 SLO alert rules.
 
 **Reliability** — transactional outbox (no dual-write window), circuit breaker
 on the payment provider, BullMQ retries, graceful shutdown.
+
+### What is deliberately not built
+
+Three integrations stop at the boundary, because wiring a real vendor adds
+account setup rather than engineering signal. Each is a seam behind an
+interface, not a `TODO` scattered through the code:
+
+- **Media/RTC server.** `POST /consultations/:id/start` and
+  `/consultations/:id/join` issue a real signed join credential — HMAC-SHA256,
+  bound to one consultation and one user, 15-minute TTL, `host`/`guest` role —
+  which is exactly the shape Agora, Twilio Video, LiveKit and Daily expect.
+  Adopting one means reimplementing `JoinTokenService.issue()` against their
+  signing scheme; callers and the API contract do not change.
+- **Email/SMS delivery.** The notification worker writes a durable
+  `notifications` row instead of calling a provider, so delivery semantics
+  (exactly-once via `processed_events`, retries, backoff) are real and testable;
+  only the final network hop is absent.
+- **Live payment capture.** The Razorpay adapter is a complete HTTP client with
+  idempotency keys, a circuit breaker and 5xx-only retries. It is contract-
+  tested against a stubbed `fetch` that asserts the exact HTTP conversation
+  (method, path, auth header, minor-unit amounts, retry behaviour); the build
+  environment has no outbound access to Razorpay, so no live call is made.
+  `PAYMENT_PROVIDER=mock` is refused at boot when `NODE_ENV=production`.
 
 ---
 

@@ -1,5 +1,6 @@
 /* eslint-disable no-console */
 import { Client } from 'pg';
+import Redis from 'ioredis';
 import { createHmac, hkdfSync, randomBytes, createCipheriv, scryptSync } from 'node:crypto';
 import { DateTime } from 'luxon';
 import { loadEnv } from './load-env';
@@ -110,6 +111,38 @@ const pickMany = <T>(arr: T[], n: number): T[] => {
   return [...out];
 };
 
+/**
+ * Clear the Redis state that is keyed to rows the seed has just deleted.
+ *
+ * Scoped deliberately: BullMQ queues, rate-limit counters, the audit chain head
+ * and cached search results. Anything else in the database is left alone.
+ */
+async function resetRedisState(): Promise<void> {
+  const url = process.env.REDIS_URL;
+  if (!url) return;
+
+  const redis = new Redis(url, { maxRetriesPerRequest: null, lazyConnect: true });
+  try {
+    await redis.connect();
+    const patterns = ['bull:*', 'rl:*', 'audit:chain:*', 'cache:*', 'idem:*'];
+    let removed = 0;
+    for (const pattern of patterns) {
+      let cursor = '0';
+      do {
+        const [next, keys] = await redis.scan(cursor, 'MATCH', pattern, 'COUNT', 500);
+        cursor = next;
+        if (keys.length) removed += await redis.del(...keys);
+      } while (cursor !== '0');
+    }
+    console.log(`· redis reset: ${removed} keys cleared (queues, rate limits, caches)`);
+  } catch (error) {
+    // A seed that cannot reach Redis is still useful; say so rather than dying.
+    console.warn(`· redis reset skipped: ${(error as Error).message}`);
+  } finally {
+    redis.disconnect();
+  }
+}
+
 async function main(): Promise<void> {
   loadEnv();
   const masterKey = master(process.env.ENCRYPTION_MASTER_KEY!);
@@ -161,6 +194,18 @@ async function main(): Promise<void> {
     prescriptions, consultations, availability_slots, availability_rules, reviews, doctors,
     mfa_recovery_codes, refresh_tokens, idempotency_keys, audit_logs, profiles, users
     RESTART IDENTITY CASCADE`);
+
+  // Postgres and Redis have to be reset together.
+  //
+  // `RESTART IDENTITY` rewinds the outbox id sequence, but the drainer enqueues
+  // jobs with `jobId: outbox-{id}` for producer-side dedupe, and BullMQ keeps
+  // those keys in Redis. After a re-seed the new event id 2 collides with a
+  // completed `outbox-2` from the previous dataset, so BullMQ discards it as a
+  // duplicate and the job never runs — prescriptions sit at `pdf_status =
+  // 'pending'` for ever, with an empty queue and no failures to explain it.
+  // Rate-limit counters are cleared for the same reason: a fresh dataset should
+  // not inherit the previous run's throttle.
+  await resetRedisState();
 
   const demoPassword = 'Str0ng!Passphrase2024';
   const passwordHash = hashPassword(demoPassword);
