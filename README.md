@@ -263,9 +263,12 @@ otherwise. Run **`./ci/activate.sh`** to move it into place — see
 
 `static-analysis` (format, lint with zero warnings, typecheck) · `unit-tests` ·
 `integration-tests` (real PG 16 + Redis 7 service containers, migrations,
-coverage floor) · `openapi` (regenerate and fail on drift) · `security`
-(`npm audit`, gitleaks, CodeQL) · `docker` (buildx, Trivy scan, boot and
-SIGTERM smoke test).
+coverage floor) · `demo` (seeds, boots the API and runs the end-to-end demo
+**twice** — the second run is what catches state the first left behind) ·
+`openapi` (regenerate and fail on drift) · `security` (`npm audit`, gitleaks,
+CodeQL) · `docker` (buildx, Trivy scan, boot and SIGTERM smoke test) ·
+`supply-chain` (syft CycloneDX SBOM, grype gate at `high`, keyless cosign
+signature and SBOM attestation on `main`).
 
 ---
 

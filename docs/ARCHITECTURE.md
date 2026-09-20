@@ -348,8 +348,17 @@ would have reported as passing:
 CI runs static analysis, unit tests, integration tests against service
 containers, a coverage floor, an **OpenAPI drift check** (regenerate and
 `git diff --exit-code`, so the spec cannot silently diverge from the code),
-`npm audit`, gitleaks, CodeQL, a Trivy image scan, and a container
-boot/SIGTERM smoke test.
+`npm audit`, gitleaks, CodeQL, a Trivy image scan, a container boot/SIGTERM
+smoke test, an SBOM with a grype gate and keyless cosign signing, and the
+**end-to-end demo run twice**.
+
+Running the demo twice is not redundancy. The demo was the one artefact CI never
+executed, and it had quietly rotted: re-seeding rewound the outbox id sequence
+while BullMQ's `outbox-{id}` dedupe keys survived in Redis, so the second run's
+jobs were discarded as duplicates; the admin MFA enrolment was not idempotent,
+so two whole sections silently stopped running. The summary still said *passed*,
+with seven fewer assertions behind it. Asserting the exact invariant count on
+both runs is what makes that class of decay visible.
 
 ---
 

@@ -121,6 +121,106 @@ jobs:
           path: coverage/
           retention-days: 7
 
+  # ----------------------------------------------------------- demo flow
+  # The end-to-end demo is the artefact a reviewer runs first, and it was the
+  # one thing CI never exercised — so it rotted: a re-seed desynchronised the
+  # BullMQ dedupe keys, the admin MFA enrolment was not idempotent, and the
+  # summary happily reported "passed" while asserting seven fewer invariants.
+  # Running it twice is the point: the second run is what catches state the
+  # first one left behind.
+  demo:
+    name: End-to-end demo (twice)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: amrutam
+          POSTGRES_PASSWORD: amrutam
+          POSTGRES_DB: amrutam
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U amrutam -d amrutam"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+
+    env:
+      NODE_ENV: development
+      DATABASE_URL: postgres://amrutam:amrutam@localhost:5432/amrutam
+      REDIS_URL: redis://localhost:6379
+      JWT_ACCESS_SECRET: ci_access_secret_0123456789abcdef0123456789
+      JWT_REFRESH_SECRET: ci_refresh_secret_0123456789abcdef0123456789
+      ENCRYPTION_MASTER_KEY: 6ci00000000000000000000000000000000000000000000000000000000000ff
+      EMAIL_HMAC_KEY: 7ci00000000000000000000000000000000000000000000000000000000000ff
+      PRESCRIPTION_SIGNING_KEY: 8ci00000000000000000000000000000000000000000000000000000000000ff
+      PAYMENT_WEBHOOK_SECRET: ci_webhook_secret_change_me
+      RUN_WORKERS_IN_API: 'true'
+      OTEL_ENABLED: 'false'
+      LOG_LEVEL: warn
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+
+      - name: Migrate and seed
+        run: |
+          npm run db:migrate
+          npm run seed
+
+      - name: Boot the API
+        run: |
+          npx ts-node -r tsconfig-paths/register src/main.ts > /tmp/api.log 2>&1 &
+          echo $! > /tmp/api.pid
+          for i in $(seq 1 60); do
+            curl -fsS http://127.0.0.1:3000/healthz >/dev/null 2>&1 && exit 0
+            sleep 2
+          done
+          echo "API did not become healthy"; cat /tmp/api.log; exit 1
+
+      # A fresh seed asserts all 68 invariants.
+      - name: Demo — first run
+        run: |
+          set -o pipefail
+          npm run demo 2>&1 | tee /tmp/demo-1.log
+          grep -q "68 passed" /tmp/demo-1.log || {
+            echo "::error::expected 68 invariants on a freshly seeded database"; exit 1; }
+
+      # The second run is the regression test. It must not crash, must not be
+      # locked out by the throttle the first run tripped, and must not silently
+      # assert less: 67 is the fresh-seed-only admin check, and nothing else.
+      - name: Demo — second run (idempotency)
+        run: |
+          set -o pipefail
+          npm run demo 2>&1 | tee /tmp/demo-2.log
+          grep -q "67 passed" /tmp/demo-2.log || {
+            echo "::error::re-running the demo changed the assertion count"; exit 1; }
+          if grep -q "failed" /tmp/demo-2.log; then
+            echo "::error::second demo run reported failures"; exit 1
+          fi
+
+      - name: Stop the API
+        if: always()
+        run: kill "$(cat /tmp/api.pid)" 2>/dev/null || true
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: demo-logs
+          path: |
+            /tmp/demo-1.log
+            /tmp/demo-2.log
+            /tmp/api.log
+          retention-days: 7
+
   # ------------------------------------------------------------ contract
   openapi:
     name: OpenAPI contract
