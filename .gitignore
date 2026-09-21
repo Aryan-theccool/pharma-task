@@ -1,0 +1,47 @@
+# dependencies & build output
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+
+# runtime artefacts
+*.log
+storage/
+.tmp/
+tmp/
+.pgdata/
+.localstack/
+load/results/*.json
+!load/results/.gitkeep
+
+# local secrets — order matters: ignore .env*, then re-include the templates
+.env
+.env.*
+!.env.example
+!.env.docker
+!.env.test.example
+
+# editors / OS
+.DS_Store
+.idea/
+.vscode/
+
+# Terraform
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+tfplan
+*.tfplan
+
+# Cached TOTP secret for the seeded demo admin (local only; see scripts/demo-flow.ts)
+.demo-admin-totp

@@ -1,0 +1,423 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# A new push to the same branch cancels the previous run — no point burning
+# minutes on a commit nobody is looking at any more.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '20'
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------- lint
+  static-analysis:
+    name: Lint, format & types
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci
+
+      - name: Prettier
+        run: npm run format:check
+
+      - name: ESLint
+        run: npm run lint
+
+      - name: TypeScript (strict, no emit)
+        run: npm run typecheck
+
+  # ---------------------------------------------------------------- unit
+  unit-tests:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - run: npm run test:unit
+
+  # --------------------------------------------------------- integration
+  integration-tests:
+    name: Integration tests
+    runs-on: ubuntu-latest
+
+    # Real Postgres and real Redis: the booking concurrency guarantees depend on
+    # GiST exclusion constraints and SELECT ... FOR UPDATE NOWAIT, which no
+    # in-memory double reproduces faithfully.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: amrutam
+          POSTGRES_PASSWORD: amrutam
+          POSTGRES_DB: amrutam_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U amrutam -d amrutam_test"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgres://amrutam:amrutam@localhost:5432/amrutam_test
+      REDIS_URL: redis://localhost:6379
+      JWT_ACCESS_SECRET: ci_access_secret_0123456789abcdef0123456789
+      JWT_REFRESH_SECRET: ci_refresh_secret_0123456789abcdef0123456789
+      ENCRYPTION_MASTER_KEY: 6ci00000000000000000000000000000000000000000000000000000000000ff
+      EMAIL_HMAC_KEY: 7ci00000000000000000000000000000000000000000000000000000000000ff
+      PRESCRIPTION_SIGNING_KEY: 8ci00000000000000000000000000000000000000000000000000000000000ff
+      PAYMENT_WEBHOOK_SECRET: ci_webhook_secret_change_me
+      RUN_WORKERS_IN_API: 'false'
+      OTEL_ENABLED: 'false'
+      LOG_LEVEL: fatal
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+
+      - name: Apply migrations
+        run: npm run db:migrate
+
+      - name: Integration suite with coverage
+        run: npm run test:cov
+
+      - name: Enforce coverage floor
+        run: node scripts/check-coverage.js
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage
+          path: coverage/
+          retention-days: 7
+
+  # ----------------------------------------------------------- demo flow
+  # The end-to-end demo is the artefact a reviewer runs first, and it was the
+  # one thing CI never exercised — so it rotted: a re-seed desynchronised the
+  # BullMQ dedupe keys, the admin MFA enrolment was not idempotent, and the
+  # summary happily reported "passed" while asserting seven fewer invariants.
+  # Running it twice is the point: the second run is what catches state the
+  # first one left behind.
+  demo:
+    name: End-to-end demo (twice)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: amrutam
+          POSTGRES_PASSWORD: amrutam
+          POSTGRES_DB: amrutam
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U amrutam -d amrutam"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+
+    env:
+      NODE_ENV: development
+      DATABASE_URL: postgres://amrutam:amrutam@localhost:5432/amrutam
+      REDIS_URL: redis://localhost:6379
+      JWT_ACCESS_SECRET: ci_access_secret_0123456789abcdef0123456789
+      JWT_REFRESH_SECRET: ci_refresh_secret_0123456789abcdef0123456789
+      ENCRYPTION_MASTER_KEY: 6ci00000000000000000000000000000000000000000000000000000000000ff
+      EMAIL_HMAC_KEY: 7ci00000000000000000000000000000000000000000000000000000000000ff
+      PRESCRIPTION_SIGNING_KEY: 8ci00000000000000000000000000000000000000000000000000000000000ff
+      PAYMENT_WEBHOOK_SECRET: ci_webhook_secret_change_me
+      RUN_WORKERS_IN_API: 'true'
+      OTEL_ENABLED: 'false'
+      LOG_LEVEL: warn
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+
+      - name: Migrate and seed
+        run: |
+          npm run db:migrate
+          npm run seed
+
+      - name: Boot the API
+        run: |
+          npx ts-node -r tsconfig-paths/register src/main.ts > /tmp/api.log 2>&1 &
+          echo $! > /tmp/api.pid
+          for i in $(seq 1 60); do
+            curl -fsS http://127.0.0.1:3000/healthz >/dev/null 2>&1 && exit 0
+            sleep 2
+          done
+          echo "API did not become healthy"; cat /tmp/api.log; exit 1
+
+      # A fresh seed asserts all 68 invariants.
+      - name: Demo — first run
+        run: |
+          set -o pipefail
+          npm run demo 2>&1 | tee /tmp/demo-1.log
+          grep -q "68 passed" /tmp/demo-1.log || {
+            echo "::error::expected 68 invariants on a freshly seeded database"; exit 1; }
+
+      # The second run is the regression test. It must not crash, must not be
+      # locked out by the throttle the first run tripped, and must not silently
+      # assert less: 67 is the fresh-seed-only admin check, and nothing else.
+      - name: Demo — second run (idempotency)
+        run: |
+          set -o pipefail
+          npm run demo 2>&1 | tee /tmp/demo-2.log
+          grep -q "67 passed" /tmp/demo-2.log || {
+            echo "::error::re-running the demo changed the assertion count"; exit 1; }
+          if grep -q "failed" /tmp/demo-2.log; then
+            echo "::error::second demo run reported failures"; exit 1
+          fi
+
+      - name: Stop the API
+        if: always()
+        run: kill "$(cat /tmp/api.pid)" 2>/dev/null || true
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: demo-logs
+          path: |
+            /tmp/demo-1.log
+            /tmp/demo-2.log
+            /tmp/api.log
+          retention-days: 7
+
+  # ------------------------------------------------------------ contract
+  openapi:
+    name: OpenAPI contract
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgres://unused:unused@localhost:5432/unused
+      REDIS_URL: redis://localhost:6379
+      JWT_ACCESS_SECRET: ci_access_secret_0123456789abcdef0123456789
+      JWT_REFRESH_SECRET: ci_refresh_secret_0123456789abcdef0123456789
+      ENCRYPTION_MASTER_KEY: 6ci00000000000000000000000000000000000000000000000000000000000ff
+      EMAIL_HMAC_KEY: 7ci00000000000000000000000000000000000000000000000000000000000ff
+      PRESCRIPTION_SIGNING_KEY: 8ci00000000000000000000000000000000000000000000000000000000000ff
+      PAYMENT_WEBHOOK_SECRET: ci_webhook_secret_change_me
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+
+      - name: Regenerate the spec
+        run: npm run openapi:generate
+
+      - name: Fail if the committed spec is stale
+        run: |
+          if ! git diff --exit-code --stat docs/openapi.json; then
+            echo "::error::docs/openapi.json is out of date. Run 'npm run openapi:generate' and commit the result."
+            exit 1
+          fi
+
+  # ------------------------------------------------------------ security
+  security:
+    name: Dependency & secret scanning
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # gitleaks needs history
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+
+      # Fails the build on a known-exploitable dependency.
+      - name: npm audit (high and above)
+        run: npm audit --audit-level=high
+
+      - name: Secret scan
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Static analysis (CodeQL)
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+          queries: security-extended
+      - uses: github/codeql-action/analyze@v3
+
+  # -------------------------------------------------------------- docker
+  docker:
+    name: Build & scan image
+    runs-on: ubuntu-latest
+    needs: [static-analysis, unit-tests]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: runtime
+          push: false
+          load: true
+          tags: amrutam-api:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Scan image for CVEs
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          image-ref: amrutam-api:${{ github.sha }}
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          severity: CRITICAL,HIGH
+
+      - name: Smoke-test the image boots and drains
+        run: |
+          docker network create amrutam-ci
+          docker run -d --name pg --network amrutam-ci \
+            -e POSTGRES_USER=amrutam -e POSTGRES_PASSWORD=amrutam -e POSTGRES_DB=amrutam \
+            postgres:16-alpine
+          docker run -d --name redis --network amrutam-ci redis:7-alpine
+
+          # Wait for Postgres rather than sleeping a fixed amount.
+          for i in $(seq 1 30); do
+            docker exec pg pg_isready -U amrutam -d amrutam && break
+            sleep 2
+          done
+
+          docker run -d --name api --network amrutam-ci -p 3000:3000 \
+            -e DATABASE_URL=postgres://amrutam:amrutam@pg:5432/amrutam \
+            -e REDIS_URL=redis://redis:6379 \
+            -e JWT_ACCESS_SECRET=ci_access_secret_0123456789abcdef0123456789 \
+            -e JWT_REFRESH_SECRET=ci_refresh_secret_0123456789abcdef0123456789 \
+            -e ENCRYPTION_MASTER_KEY=6ci00000000000000000000000000000000000000000000000000000000000ff \
+            -e EMAIL_HMAC_KEY=7ci00000000000000000000000000000000000000000000000000000000000ff \
+            -e PRESCRIPTION_SIGNING_KEY=8ci00000000000000000000000000000000000000000000000000000000000ff \
+            -e PAYMENT_WEBHOOK_SECRET=ci_webhook_secret_change_me \
+            amrutam-api:${{ github.sha }}
+
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:3000/healthz; then echo "healthy"; break; fi
+            sleep 2
+          done
+          curl -fsS http://localhost:3000/healthz || { docker logs api; exit 1; }
+
+          # SIGTERM must drain cleanly, not be killed after the 10s grace period.
+          start=$(date +%s)
+          docker stop --time 30 api
+          echo "shutdown took $(( $(date +%s) - start ))s"
+          docker logs api 2>&1 | tail -20
+
+  # ------------------------------------------------------- supply chain
+  # Answers "what is actually inside the artefact we ship, and can anyone
+  # prove this image is the one CI built?". Separate from `docker` so a
+  # provenance failure is legible on its own rather than buried in a build log.
+  supply-chain:
+    name: SBOM & provenance
+    runs-on: ubuntu-latest
+    needs: [docker]
+    permissions:
+      contents: read
+      id-token: write # keyless signing via the OIDC token
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Rebuild image (cached from the docker job)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: runtime
+          push: false
+          load: true
+          tags: amrutam-api:${{ github.sha }}
+          cache-from: type=gha
+
+      # CycloneDX rather than SPDX: it carries dependency relationships and
+      # feeds directly into vulnerability tooling.
+      - name: Generate SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          image: amrutam-api:${{ github.sha }}
+          format: cyclonedx-json
+          output-file: sbom.cyclonedx.json
+          artifact-name: sbom.cyclonedx.json
+
+      # Fails on a vulnerable dependency that the image scan can miss, because
+      # it reads the resolved SBOM rather than the package manifest.
+      - name: Scan the SBOM
+        uses: anchore/scan-action@v4
+        with:
+          sbom: sbom.cyclonedx.json
+          severity-cutoff: high
+          fail-build: true
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      # Keyless: the signature is bound to this workflow's OIDC identity and
+      # recorded in the Rekor transparency log, so there is no long-lived
+      # signing key to leak. Only runs on a push to main — a PR from a fork
+      # must never be able to produce a signature that looks official.
+      - name: Sign the image and attach the SBOM
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          COSIGN_EXPERIMENTAL: '1'
+        run: |
+          set -euo pipefail
+          DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' amrutam-api:${{ github.sha }} 2>/dev/null \
+            || echo "amrutam-api:${{ github.sha }}")
+          echo "signing $DIGEST"
+          cosign sign --yes "$DIGEST"
+          cosign attest --yes --predicate sbom.cyclonedx.json --type cyclonedx "$DIGEST"
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-${{ github.sha }}
+          path: sbom.cyclonedx.json
+          retention-days: 90

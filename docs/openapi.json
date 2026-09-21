@@ -1,0 +1,2682 @@
+{
+  "openapi": "3.0.0",
+  "paths": {
+    "/api/v1/auth/register": {
+      "post": {
+        "operationId": "AuthController_register",
+        "summary": "Register a patient or doctor account",
+        "description": "Passwords are hashed with a memory-hard KDF; the email is stored as an AES-256-GCM ciphertext plus a deterministic HMAC blind index for lookup. Privileged roles cannot be self-assigned.",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Account created."
+          },
+          "409": {
+            "description": "Registration could not be completed."
+          }
+        },
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/login": {
+      "post": {
+        "operationId": "AuthController_login",
+        "summary": "Authenticate and receive an access + refresh token pair",
+        "description": "Returns a 10-minute access token and a rotating refresh token. Accounts lock for 15 minutes after 5 failed attempts. When MFA is enabled the `totp` field is mandatory.",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/refresh": {
+      "post": {
+        "operationId": "AuthController_refresh",
+        "summary": "Rotate the refresh token",
+        "description": "Single-use rotation with reuse detection: replaying a consumed token revokes the entire token family, on the assumption that it was exfiltrated.",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefreshDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/logout": {
+      "post": {
+        "operationId": "AuthController_logout",
+        "summary": "Revoke the current session and refresh token",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LogoutDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "auth"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/mfa/enroll": {
+      "post": {
+        "operationId": "AuthController_enrollMfa",
+        "summary": "Start TOTP enrolment",
+        "description": "Returns an otpauth:// URI and a QR data-URL. The secret only becomes active after verify.",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "auth"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/mfa/verify": {
+      "post": {
+        "operationId": "AuthController_verifyMfa",
+        "summary": "Confirm TOTP enrolment and receive recovery codes",
+        "description": "Ten single-use recovery codes are returned once and stored only as hashes.",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MfaVerifyDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "auth"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/mfa/disable": {
+      "post": {
+        "operationId": "AuthController_disableMfa",
+        "summary": "Disable MFA (not permitted for administrators)",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MfaVerifyDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "auth"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/me": {
+      "get": {
+        "operationId": "UsersController_me",
+        "summary": "Current user profile (PII decrypted for the owner)",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "users"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "patch": {
+        "operationId": "UsersController_updateMe",
+        "summary": "Update the current user’s profile",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateProfileDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "users"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/me/consultations": {
+      "get": {
+        "operationId": "UsersController_myConsultations",
+        "summary": "The caller’s consultation history",
+        "parameters": [
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "enum": [
+                "scheduled",
+                "in_progress",
+                "completed",
+                "no_show",
+                "cancelled"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "maximum": 100,
+              "default": 20,
+              "type": "number"
+            }
+          },
+          {
+            "name": "cursor",
+            "required": false,
+            "in": "query",
+            "description": "ISO timestamp cursor from the previous page.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "users"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/users/{id}/pii": {
+      "delete": {
+        "operationId": "UsersController_erase",
+        "summary": "Right-to-erasure (crypto-shredding)",
+        "description": "Destroys the ability to read a user’s PII while retaining clinical records for the statutory 7-year period. Admin + step-up MFA required.",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "403": {
+            "description": "Requires role: admin"
+          }
+        },
+        "tags": [
+          "users"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/consultations": {
+      "get": {
+        "operationId": "ConsultationsController_list",
+        "summary": "List consultations visible to the caller",
+        "description": "Patients see their own; doctors see theirs; admins see all. Cursor paginated.",
+        "parameters": [
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "enum": [
+                "scheduled",
+                "in_progress",
+                "completed",
+                "no_show",
+                "cancelled"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "maximum": 100,
+              "default": 20,
+              "type": "number"
+            }
+          },
+          {
+            "name": "cursor",
+            "required": false,
+            "in": "query",
+            "description": "ISO timestamp cursor from the previous page.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "consultations"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/consultations/{id}": {
+      "get": {
+        "operationId": "ConsultationsController_findOne",
+        "summary": "Fetch a consultation including decrypted clinical notes",
+        "description": "PHI access is always written to the append-only audit log.",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "consultations"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/consultations/{id}/start": {
+      "post": {
+        "operationId": "ConsultationsController_start",
+        "summary": "Start the consultation (scheduled → in_progress)",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "403": {
+            "description": "Requires role: doctor | admin"
+          }
+        },
+        "tags": [
+          "consultations"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/consultations/{id}/join": {
+      "post": {
+        "operationId": "ConsultationsController_join",
+        "summary": "Get a join credential for the live media session",
+        "description": "Returns a short-lived, signed token bound to this consultation and the calling user. The patient joins as a guest, the treating doctor as the host. Only valid while the consultation is in_progress.",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Token issued."
+          },
+          "403": {
+            "description": "Requires role: doctor | patient | admin"
+          },
+          "404": {
+            "description": "Not found, or not yours."
+          },
+          "409": {
+            "description": "Consultation is not in progress."
+          }
+        },
+        "tags": [
+          "consultations"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/consultations/{id}/complete": {
+      "post": {
+        "operationId": "ConsultationsController_complete",
+        "summary": "Complete the consultation (in_progress → completed)",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "403": {
+            "description": "Requires role: doctor | admin"
+          }
+        },
+        "tags": [
+          "consultations"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/consultations/{id}/no-show": {
+      "post": {
+        "operationId": "ConsultationsController_noShow",
+        "summary": "Mark the patient as a no-show (scheduled → no_show)",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "403": {
+            "description": "Requires role: doctor | admin"
+          }
+        },
+        "tags": [
+          "consultations"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/consultations/{id}/notes": {
+      "patch": {
+        "operationId": "ConsultationsController_updateNotes",
+        "summary": "Write clinical notes (treating doctor only)",
+        "description": "Notes are PHI and are stored AES-256-GCM encrypted with a versioned key envelope.",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateNotesDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "403": {
+            "description": "Requires role: doctor | admin"
+          }
+        },
+        "tags": [
+          "consultations"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/doctors/search": {
+      "get": {
+        "operationId": "DoctorsController_search",
+        "summary": "Search and filter doctors",
+        "description": "Full-text + trigram search with specialization/language/fee/rating/availability filters, facet counts and keyset (cursor) pagination. Results are cached for 60s in Redis.",
+        "parameters": [
+          {
+            "name": "q",
+            "required": false,
+            "in": "query",
+            "description": "Free-text search over name, specialization, language and bio.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "specialization",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "example": "ayurveda",
+              "type": "string"
+            }
+          },
+          {
+            "name": "language",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "example": "hi",
+              "type": "string"
+            }
+          },
+          {
+            "name": "minFee",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "example": 300,
+              "type": "number"
+            }
+          },
+          {
+            "name": "maxFee",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "example": 1500,
+              "type": "number"
+            }
+          },
+          {
+            "name": "minRating",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "example": 4,
+              "type": "number"
+            }
+          },
+          {
+            "name": "minExperience",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "example": 5,
+              "type": "number"
+            }
+          },
+          {
+            "name": "availableFrom",
+            "required": false,
+            "in": "query",
+            "description": "Only doctors with a free slot at or after this instant.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "required": false,
+            "in": "query",
+            "description": "Opaque keyset cursor from the previous page.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "maximum": 100,
+              "default": 20,
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "doctors"
+        ]
+      }
+    },
+    "/api/v1/doctors/onboard": {
+      "post": {
+        "operationId": "DoctorsController_onboard",
+        "summary": "Create the doctor profile for the current account",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OnboardDoctorDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "403": {
+            "description": "Requires role: doctor | admin"
+          }
+        },
+        "tags": [
+          "doctors"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/doctors/{id}": {
+      "get": {
+        "operationId": "DoctorsController_findOne",
+        "summary": "Fetch a doctor profile (cache-aside, 10 min TTL)",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "doctors"
+        ]
+      },
+      "patch": {
+        "operationId": "DoctorsController_update",
+        "summary": "Update a doctor profile",
+        "description": "Doctors may only edit their own profile. Verification state is admin-only.",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateDoctorDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "403": {
+            "description": "Requires role: doctor | admin"
+          }
+        },
+        "tags": [
+          "doctors"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/doctors/{id}/availability-rules": {
+      "post": {
+        "operationId": "DoctorsController_createRule",
+        "summary": "Create a recurring availability rule",
+        "description": "Authored in the doctor’s local timezone; materialised slots are stored in UTC.",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateAvailabilityRuleDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "403": {
+            "description": "Requires role: doctor | admin"
+          }
+        },
+        "tags": [
+          "doctors"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "get": {
+        "operationId": "DoctorsController_listRules",
+        "summary": "List a doctor’s active availability rules",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "doctors"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/doctors/{id}/availability-rules/{ruleId}": {
+      "delete": {
+        "operationId": "DoctorsController_deleteRule",
+        "summary": "Deactivate an availability rule",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ruleId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "403": {
+            "description": "Requires role: doctor | admin"
+          }
+        },
+        "tags": [
+          "doctors"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/doctors/{id}/slots/materialize": {
+      "post": {
+        "operationId": "DoctorsController_materialize",
+        "summary": "Expand availability rules into bookable slots",
+        "description": "Idempotent — re-running never duplicates slots (guarded by an EXCLUDE constraint).",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MaterializeSlotsDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "403": {
+            "description": "Requires role: doctor | admin"
+          }
+        },
+        "tags": [
+          "doctors"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/doctors/{id}/slots": {
+      "get": {
+        "operationId": "DoctorsController_listSlots",
+        "summary": "List a doctor’s slots in a time window (30s cache)",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "from",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "example": "2026-09-20T00:00:00.000Z",
+              "type": "string"
+            }
+          },
+          {
+            "name": "to",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "example": "2026-09-27T00:00:00.000Z",
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "enum": [
+                "available",
+                "held",
+                "booked",
+                "blocked"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "doctors"
+        ]
+      }
+    },
+    "/api/v1/doctors/{id}/slots/block": {
+      "post": {
+        "operationId": "DoctorsController_block",
+        "summary": "Block a time range (leave). Only free slots are affected.",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BlockSlotDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "403": {
+            "description": "Requires role: doctor | admin"
+          }
+        },
+        "tags": [
+          "doctors"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/bookings/hold": {
+      "post": {
+        "operationId": "BookingController_hold",
+        "summary": "Hold a slot for a short window",
+        "description": "Reserves the slot for 5 minutes and returns an unguessable holdToken bound to the caller. Protected by a Redis lock, a `FOR UPDATE NOWAIT` row lock and a GiST exclusion constraint, so concurrent holds on the same slot yield exactly one winner.",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Client-generated unique key (UUIDv4 recommended). Replaying the same key with the same payload returns the original response with `Idempotent-Replay: true`. Reusing it with a different payload returns 409. Keys are scoped to user + endpoint and expire after 24h.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "5f1d8f4e-6c2b-4a5b-9f1e-3b7c1d2e4a55"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HoldSlotDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Slot held."
+          },
+          "403": {
+            "description": "Requires role: patient | admin"
+          },
+          "409": {
+            "description": "Idempotency-Key reused with a different payload, or an identical request is in flight."
+          }
+        },
+        "tags": [
+          "booking"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/bookings/confirm": {
+      "post": {
+        "operationId": "BookingController_confirm",
+        "summary": "Confirm a held slot (booking saga)",
+        "description": "Runs the orchestrated saga: validate hold → authorize payment → create consultation → capture payment → emit notifications through the transactional outbox. Any failure triggers compensations in reverse order (void/refund payment, cancel consultation, release slot).",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Client-generated unique key (UUIDv4 recommended). Replaying the same key with the same payload returns the original response with `Idempotent-Replay: true`. Reusing it with a different payload returns 409. Keys are scoped to user + endpoint and expire after 24h.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "5f1d8f4e-6c2b-4a5b-9f1e-3b7c1d2e4a55"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfirmBookingDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Consultation created and payment captured."
+          },
+          "403": {
+            "description": "Requires role: patient | admin"
+          },
+          "409": {
+            "description": "Idempotency-Key reused with a different payload, or an identical request is in flight."
+          }
+        },
+        "tags": [
+          "booking"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/bookings/{id}/cancel": {
+      "post": {
+        "operationId": "BookingController_cancel",
+        "summary": "Cancel a consultation",
+        "description": "Releases the slot and refunds automatically when cancelled outside the refund window (REFUND_WINDOW_HOURS, default 24h).",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Client-generated unique key (UUIDv4 recommended). Replaying the same key with the same payload returns the original response with `Idempotent-Replay: true`. Reusing it with a different payload returns 409. Keys are scoped to user + endpoint and expire after 24h.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "5f1d8f4e-6c2b-4a5b-9f1e-3b7c1d2e4a55"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CancelBookingDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "409": {
+            "description": "Idempotency-Key reused with a different payload, or an identical request is in flight."
+          }
+        },
+        "tags": [
+          "booking"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/bookings/{id}/reschedule": {
+      "post": {
+        "operationId": "BookingController_reschedule",
+        "summary": "Move a consultation to another slot",
+        "description": "Claims the new slot and releases the old one in a single atomic transaction.",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Client-generated unique key (UUIDv4 recommended). Replaying the same key with the same payload returns the original response with `Idempotent-Replay: true`. Reusing it with a different payload returns 409. Keys are scoped to user + endpoint and expire after 24h.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "5f1d8f4e-6c2b-4a5b-9f1e-3b7c1d2e4a55"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RescheduleDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "403": {
+            "description": "Requires role: patient | admin"
+          },
+          "409": {
+            "description": "Idempotency-Key reused with a different payload, or an identical request is in flight."
+          }
+        },
+        "tags": [
+          "booking"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/payments": {
+      "get": {
+        "operationId": "PaymentsController_list",
+        "summary": "List the caller’s payments",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "payments"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/payments/{id}": {
+      "get": {
+        "operationId": "PaymentsController_findOne",
+        "summary": "Fetch a payment (owner or admin only)",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "payments"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/payments/{id}/refund": {
+      "post": {
+        "operationId": "PaymentsController_refund",
+        "summary": "Refund a payment (step-up MFA required)",
+        "description": "Full or partial. Idempotency-Key guarantees a retry never issues a second refund.",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Client-generated unique key (UUIDv4 recommended). Replaying the same key with the same payload returns the original response with `Idempotent-Replay: true`. Reusing it with a different payload returns 409. Keys are scoped to user + endpoint and expire after 24h.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "5f1d8f4e-6c2b-4a5b-9f1e-3b7c1d2e4a55"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefundDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "403": {
+            "description": "Requires a multi-factor authenticated session."
+          },
+          "409": {
+            "description": "Idempotency-Key reused with a different payload, or an identical request is in flight."
+          }
+        },
+        "tags": [
+          "payments"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/payments/webhook": {
+      "post": {
+        "operationId": "PaymentsController_webhook",
+        "summary": "Payment provider webhook (HMAC verified, replay-safe)",
+        "description": "Requires `X-Signature` (hex HMAC-SHA256 of `${timestamp}.${rawBody}`) and `X-Timestamp` (unix seconds, ±5 min). Duplicate eventIds are acknowledged without reprocessing.",
+        "parameters": [
+          {
+            "name": "x-signature",
+            "required": true,
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-timestamp",
+            "required": true,
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebhookDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "payments"
+        ]
+      }
+    },
+    "/api/v1/prescriptions/{id}": {
+      "get": {
+        "operationId": "PrescriptionsController_findOne",
+        "summary": "Fetch a prescription (decrypted for authorised readers)",
+        "description": "Visible to the patient, the prescribing doctor and admins. Every read is audited.",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "prescriptions"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/prescriptions/{id}/sign": {
+      "post": {
+        "operationId": "PrescriptionsController_sign",
+        "summary": "Digitally sign a prescription (step-up MFA required)",
+        "description": "Stamps an HMAC-SHA256 signature over the canonical content and makes the record immutable. Triggers asynchronous PDF generation via the transactional outbox.",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Client-generated unique key (UUIDv4 recommended). Replaying the same key with the same payload returns the original response with `Idempotent-Replay: true`. Reusing it with a different payload returns 409. Keys are scoped to user + endpoint and expire after 24h.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "5f1d8f4e-6c2b-4a5b-9f1e-3b7c1d2e4a55"
+            }
+          }
+        ],
+        "responses": {
+          "403": {
+            "description": "Requires role: doctor | admin"
+          },
+          "409": {
+            "description": "Idempotency-Key reused with a different payload, or an identical request is in flight."
+          }
+        },
+        "tags": [
+          "prescriptions"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/prescriptions/{id}/verify": {
+      "get": {
+        "operationId": "PrescriptionsController_verify",
+        "summary": "Verify the digital signature",
+        "description": "Recomputes the HMAC over current content to prove nothing changed after signing.",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "prescriptions"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/prescriptions/{id}/pdf": {
+      "get": {
+        "operationId": "PrescriptionsController_pdf",
+        "summary": "Download the generated PDF",
+        "description": "Returns 409 until the asynchronous worker has finished rendering.",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "prescriptions"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/consultations/{id}/prescriptions": {
+      "post": {
+        "operationId": "ConsultationPrescriptionsController_create",
+        "summary": "Issue a prescription for a consultation",
+        "description": "Treating doctor only. Drug list, diagnosis and advice are encrypted at rest (AES-256-GCM). The prescription stays editable until it is signed.",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Client-generated unique key (UUIDv4 recommended). Replaying the same key with the same payload returns the original response with `Idempotent-Replay: true`. Reusing it with a different payload returns 409. Keys are scoped to user + endpoint and expire after 24h.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "5f1d8f4e-6c2b-4a5b-9f1e-3b7c1d2e4a55"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePrescriptionDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "403": {
+            "description": "Requires role: doctor | admin"
+          },
+          "409": {
+            "description": "Idempotency-Key reused with a different payload, or an identical request is in flight."
+          }
+        },
+        "tags": [
+          "prescriptions"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "get": {
+        "operationId": "ConsultationPrescriptionsController_list",
+        "summary": "List prescriptions issued for a consultation",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "prescriptions"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/analytics/overview": {
+      "get": {
+        "operationId": "AdminController_overview",
+        "summary": "Platform KPI overview (60s cache)",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "403": {
+            "description": "Requires role: admin"
+          }
+        },
+        "tags": [
+          "admin"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/analytics/revenue": {
+      "get": {
+        "operationId": "AdminController_revenue",
+        "summary": "Daily revenue series from the materialized view",
+        "parameters": [
+          {
+            "name": "days",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "maximum": 365,
+              "default": 30,
+              "type": "number"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "maximum": 100,
+              "default": 20,
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "403": {
+            "description": "Requires role: admin"
+          }
+        },
+        "tags": [
+          "admin"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/analytics/doctor-utilization": {
+      "get": {
+        "operationId": "AdminController_utilization",
+        "summary": "Slot utilisation ranked by doctor",
+        "parameters": [
+          {
+            "name": "days",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "maximum": 365,
+              "default": 30,
+              "type": "number"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "maximum": 100,
+              "default": 20,
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "403": {
+            "description": "Requires role: admin"
+          }
+        },
+        "tags": [
+          "admin"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/analytics/funnel": {
+      "get": {
+        "operationId": "AdminController_funnel",
+        "summary": "Booking conversion funnel: hold → confirm → complete",
+        "parameters": [
+          {
+            "name": "days",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "maximum": 365,
+              "default": 30,
+              "type": "number"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "maximum": 100,
+              "default": 20,
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "403": {
+            "description": "Requires role: admin"
+          }
+        },
+        "tags": [
+          "admin"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/analytics/refresh": {
+      "post": {
+        "operationId": "AdminController_refresh",
+        "summary": "Force a refresh of the analytics materialized views",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": ""
+          },
+          "403": {
+            "description": "Requires role: admin"
+          }
+        },
+        "tags": [
+          "admin"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/audit-logs": {
+      "get": {
+        "operationId": "AdminController_auditLogs",
+        "summary": "Query the append-only audit trail",
+        "description": "Filter by actor, action, resource type and time window. Cursor paginated.",
+        "parameters": [
+          {
+            "name": "actor",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "name": "action",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "example": "booking.confirm",
+              "type": "string"
+            }
+          },
+          {
+            "name": "resourceType",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "example": "consultation",
+              "type": "string"
+            }
+          },
+          {
+            "name": "from",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "to",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "maximum": 200,
+              "default": 50,
+              "type": "number"
+            }
+          },
+          {
+            "name": "cursor",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "403": {
+            "description": "Requires role: admin"
+          }
+        },
+        "tags": [
+          "admin"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/audit-logs/verify": {
+      "get": {
+        "operationId": "AdminController_verifyChain",
+        "summary": "Verify the tamper-evident hash chain",
+        "description": "Recomputes SHA-256(prev_hash ‖ row) for every entry and reports the first divergence. Any deletion or edit of a historical row is detected here.",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "403": {
+            "description": "Requires role: admin"
+          }
+        },
+        "tags": [
+          "admin"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/integrity/verify": {
+      "get": {
+        "operationId": "IntegrityController_verify",
+        "summary": "Verify clinical-row integrity",
+        "description": "Detects modifications to consultations, prescriptions and payments that did not originate from the application — including writes made with a direct database session, writes made with the capture trigger disabled, and tampering with the journal itself.",
+        "parameters": [
+          {
+            "name": "sinceJournalId",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Integrity report (ok=false when findings exist)"
+          },
+          "403": {
+            "description": "Requires role: admin"
+          }
+        },
+        "tags": [
+          "integrity"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/integrity/checkpoint": {
+      "post": {
+        "operationId": "IntegrityController_checkpoint",
+        "summary": "Seal the journal up to the current head",
+        "description": "Folds all journal entries since the last checkpoint into a chained hash, making any later deletion of those entries detectable.",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": ""
+          },
+          "403": {
+            "description": "Requires role: admin"
+          }
+        },
+        "tags": [
+          "integrity"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/integrity/saga-dead-letters": {
+      "get": {
+        "operationId": "IntegrityController_deadLetters",
+        "summary": "Sagas parked for manual intervention",
+        "description": "Sagas the reconciler could not complete or compensate after the configured number of attempts. Each entry needs a human decision; the runbook has the procedure.",
+        "parameters": [
+          {
+            "name": "limit",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "403": {
+            "description": "Requires role: admin"
+          }
+        },
+        "tags": [
+          "integrity"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/integrity/reconcile-sagas": {
+      "post": {
+        "operationId": "IntegrityController_reconcileNow",
+        "summary": "Force a saga reconciliation pass",
+        "description": "Runs the recovery sweep immediately instead of waiting for the next scheduled pass. Idempotent and safe to call during an incident.",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": ""
+          },
+          "403": {
+            "description": "Requires role: admin"
+          }
+        },
+        "tags": [
+          "integrity"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/integrity/history/{table}/{rowId}": {
+      "get": {
+        "operationId": "IntegrityController_history",
+        "summary": "Mutation history for one clinical row",
+        "description": "Every recorded change to a row, with the database user, client address and whether the write carried a valid proof of application origin.",
+        "parameters": [
+          {
+            "name": "table",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "rowId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "403": {
+            "description": "Requires role: admin"
+          }
+        },
+        "tags": [
+          "integrity"
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/healthz": {
+      "get": {
+        "operationId": "HealthController_liveness",
+        "summary": "Liveness probe (no dependency checks)",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "ops"
+        ]
+      }
+    },
+    "/readyz": {
+      "get": {
+        "operationId": "HealthController_readiness",
+        "summary": "Readiness probe (deep-checks Postgres and Redis)",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "ops"
+        ]
+      }
+    }
+  },
+  "info": {
+    "title": "Amrutam Telemedicine API",
+    "description": "Production-grade telemedicine backend.\n\n**Conventions**\n- Errors follow RFC 7807 `application/problem+json`.\n- Mutating money/slot endpoints require an `Idempotency-Key` header; replays return the original response with `Idempotent-Replay: true`.\n- Lists use opaque cursor pagination (`?cursor=&limit=`).\n- Every response echoes `X-Request-Id` for support correlation.\n- Rate limits are advertised via `RateLimit-*` headers; 429s include `Retry-After`.",
+    "version": "1.0.0",
+    "contact": {}
+  },
+  "tags": [
+    {
+      "name": "auth",
+      "description": "Registration, login, token rotation and MFA"
+    },
+    {
+      "name": "users",
+      "description": "Profiles and personal data"
+    },
+    {
+      "name": "doctors",
+      "description": "Doctor profiles, availability and search"
+    },
+    {
+      "name": "booking",
+      "description": "Hold → confirm → cancel → reschedule (saga)"
+    },
+    {
+      "name": "consultations",
+      "description": "Consultation lifecycle and clinical notes"
+    },
+    {
+      "name": "prescriptions",
+      "description": "Issue, sign, verify and download prescriptions"
+    },
+    {
+      "name": "payments",
+      "description": "Payment intents, refunds and provider webhooks"
+    },
+    {
+      "name": "admin",
+      "description": "Analytics and the audit trail"
+    },
+    {
+      "name": "ops",
+      "description": "Health, readiness and metrics"
+    }
+  ],
+  "servers": [
+    {
+      "url": "http://localhost:3000",
+      "description": "Local development"
+    },
+    {
+      "url": "https://api.amrutam.example.com",
+      "description": "Production"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "bearer": {
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "type": "http"
+      }
+    },
+    "schemas": {
+      "RegisterDto": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "example": "asha.patel@example.com"
+          },
+          "password": {
+            "type": "string",
+            "example": "Str0ng!Passphrase2024",
+            "description": "Min 12 chars with upper, lower, digit and symbol."
+          },
+          "fullName": {
+            "type": "string",
+            "example": "Asha Patel"
+          },
+          "phone": {
+            "type": "string",
+            "example": "+919876543210"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "patient",
+              "doctor"
+            ],
+            "default": "patient"
+          }
+        },
+        "required": [
+          "email",
+          "password",
+          "fullName"
+        ]
+      },
+      "LoginDto": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "example": "asha.patel@example.com"
+          },
+          "password": {
+            "type": "string",
+            "example": "Str0ng!Passphrase2024"
+          },
+          "totp": {
+            "type": "string",
+            "example": "123456",
+            "description": "TOTP code, required when MFA is enabled."
+          }
+        },
+        "required": [
+          "email",
+          "password"
+        ]
+      },
+      "RefreshDto": {
+        "type": "object",
+        "properties": {
+          "refreshToken": {
+            "type": "string",
+            "description": "The opaque refresh token returned by /auth/login."
+          }
+        },
+        "required": [
+          "refreshToken"
+        ]
+      },
+      "LogoutDto": {
+        "type": "object",
+        "properties": {
+          "refreshToken": {
+            "type": "string"
+          }
+        }
+      },
+      "MfaVerifyDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "123456"
+          }
+        },
+        "required": [
+          "code"
+        ]
+      },
+      "UpdateProfileDto": {
+        "type": "object",
+        "properties": {
+          "fullName": {
+            "type": "string",
+            "example": "Asha Patel"
+          },
+          "dob": {
+            "type": "string",
+            "example": "1991-04-17",
+            "description": "Encrypted at rest."
+          },
+          "gender": {
+            "type": "string",
+            "enum": [
+              "female",
+              "male",
+              "other",
+              "undisclosed"
+            ]
+          },
+          "address": {
+            "type": "string",
+            "description": "Encrypted at rest."
+          },
+          "timezone": {
+            "type": "string",
+            "example": "Asia/Kolkata"
+          },
+          "locale": {
+            "type": "string",
+            "example": "en-IN"
+          }
+        }
+      },
+      "UpdateNotesDto": {
+        "type": "object",
+        "properties": {
+          "notes": {
+            "type": "string",
+            "example": "Patient reports improvement. Continue triphala for two weeks."
+          }
+        },
+        "required": [
+          "notes"
+        ]
+      },
+      "OnboardDoctorDto": {
+        "type": "object",
+        "properties": {
+          "displayName": {
+            "type": "string",
+            "example": "Dr. Meera Iyer"
+          },
+          "registrationNo": {
+            "type": "string",
+            "example": "MCI-2024-118823"
+          },
+          "bio": {
+            "type": "string",
+            "example": "Ayurvedic practitioner focused on digestive health."
+          },
+          "specializations": {
+            "example": [
+              "ayurveda",
+              "dermatology"
+            ],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "languages": {
+            "example": [
+              "en",
+              "hi"
+            ],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "experienceYears": {
+            "type": "number",
+            "example": 8
+          },
+          "consultationFee": {
+            "type": "number",
+            "example": 750
+          },
+          "timezone": {
+            "type": "string",
+            "example": "Asia/Kolkata"
+          }
+        },
+        "required": [
+          "displayName",
+          "registrationNo",
+          "specializations",
+          "languages",
+          "consultationFee"
+        ]
+      },
+      "UpdateDoctorDto": {
+        "type": "object",
+        "properties": {
+          "displayName": {
+            "type": "string"
+          },
+          "bio": {
+            "type": "string"
+          },
+          "specializations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "languages": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "experienceYears": {
+            "type": "number"
+          },
+          "consultationFee": {
+            "type": "number"
+          },
+          "timezone": {
+            "type": "string"
+          },
+          "verificationState": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "verified",
+              "rejected"
+            ],
+            "description": "Admin only."
+          }
+        }
+      },
+      "CreateAvailabilityRuleDto": {
+        "type": "object",
+        "properties": {
+          "dayOfWeek": {
+            "type": "number",
+            "example": 1,
+            "description": "0 = Sunday … 6 = Saturday"
+          },
+          "startTime": {
+            "type": "string",
+            "example": "09:00"
+          },
+          "endTime": {
+            "type": "string",
+            "example": "13:00"
+          },
+          "slotMinutes": {
+            "type": "number",
+            "example": 30,
+            "default": 30
+          },
+          "validFrom": {
+            "type": "string",
+            "example": "2026-09-20"
+          },
+          "validTo": {
+            "type": "string",
+            "example": "2026-12-31"
+          },
+          "timezone": {
+            "type": "string",
+            "example": "Asia/Kolkata"
+          }
+        },
+        "required": [
+          "dayOfWeek",
+          "startTime",
+          "endTime",
+          "validFrom"
+        ]
+      },
+      "MaterializeSlotsDto": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "string",
+            "example": "2026-09-20"
+          },
+          "days": {
+            "type": "number",
+            "example": 14,
+            "description": "Number of days to materialise."
+          }
+        },
+        "required": [
+          "from",
+          "days"
+        ]
+      },
+      "BlockSlotDto": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "string",
+            "example": "2026-09-20T09:00:00.000Z"
+          },
+          "to": {
+            "type": "string",
+            "example": "2026-09-20T11:00:00.000Z"
+          },
+          "reason": {
+            "type": "string",
+            "example": "Personal leave"
+          }
+        },
+        "required": [
+          "from",
+          "to"
+        ]
+      },
+      "HoldSlotDto": {
+        "type": "object",
+        "properties": {
+          "slotId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The availability slot to reserve."
+          }
+        },
+        "required": [
+          "slotId"
+        ]
+      },
+      "ConfirmBookingDto": {
+        "type": "object",
+        "properties": {
+          "slotId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "holdToken": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Token returned by POST /bookings/hold."
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "video",
+              "audio",
+              "chat"
+            ],
+            "default": "video"
+          },
+          "chiefComplaint": {
+            "type": "string",
+            "example": "Recurring acidity and bloating for three weeks."
+          }
+        },
+        "required": [
+          "slotId",
+          "holdToken"
+        ]
+      },
+      "CancelBookingDto": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string",
+            "example": "Travelling that day"
+          }
+        }
+      },
+      "RescheduleDto": {
+        "type": "object",
+        "properties": {
+          "newSlotId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Target slot (must belong to the same doctor)."
+          }
+        },
+        "required": [
+          "newSlotId"
+        ]
+      },
+      "RefundDto": {
+        "type": "object",
+        "properties": {
+          "amount": {
+            "type": "number",
+            "description": "Partial refund amount. Defaults to the full amount."
+          },
+          "reason": {
+            "type": "string",
+            "example": "Patient cancelled within the refund window"
+          }
+        }
+      },
+      "WebhookDto": {
+        "type": "object",
+        "properties": {
+          "eventId": {
+            "type": "string",
+            "example": "evt_01HX8Z0Q"
+          },
+          "type": {
+            "type": "string",
+            "example": "payment.captured"
+          },
+          "providerRef": {
+            "type": "string",
+            "example": "mock_4b1f..."
+          },
+          "status": {
+            "type": "string",
+            "example": "captured"
+          },
+          "data": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "eventId",
+          "type"
+        ]
+      },
+      "PrescriptionItemDto": {
+        "type": "object",
+        "properties": {
+          "drug": {
+            "type": "string",
+            "example": "Triphala Churna"
+          },
+          "dosage": {
+            "type": "string",
+            "example": "5 g"
+          },
+          "frequency": {
+            "type": "string",
+            "example": "Twice daily after meals"
+          },
+          "duration": {
+            "type": "string",
+            "example": "14 days"
+          },
+          "instructions": {
+            "type": "string",
+            "example": "Take with warm water"
+          }
+        },
+        "required": [
+          "drug",
+          "dosage",
+          "frequency",
+          "duration"
+        ]
+      },
+      "CreatePrescriptionDto": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PrescriptionItemDto"
+            }
+          },
+          "diagnosis": {
+            "type": "string",
+            "example": "Functional dyspepsia"
+          },
+          "advice": {
+            "type": "string",
+            "example": "Avoid cold drinks; walk 20 minutes after dinner."
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "ProblemDetails": {
+        "type": "object",
+        "description": "RFC 7807 problem document — the error shape for every non-2xx response.",
+        "properties": {
+          "type": {
+            "type": "string",
+            "format": "uri",
+            "example": "https://httpstatuses.io/409"
+          },
+          "title": {
+            "type": "string",
+            "example": "Slot has already been booked"
+          },
+          "status": {
+            "type": "integer",
+            "example": 409
+          },
+          "detail": {
+            "type": "string"
+          },
+          "instance": {
+            "type": "string",
+            "example": "/api/v1/bookings/confirm"
+          },
+          "requestId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "errors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "type",
+          "title",
+          "status",
+          "instance"
+        ]
+      }
+    },
+    "headers": {
+      "Idempotency-Key": {
+        "description": "Client-generated unique key (UUID recommended). Required on all mutating money or slot endpoints. Replaying the same key with the same payload returns the original response; a different payload under the same key returns 409.",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "Idempotent-Replay": {
+        "description": "Present and set to `true` when the response was served from the idempotency store.",
+        "schema": {
+          "type": "string",
+          "enum": [
+            "true"
+          ]
+        }
+      },
+      "X-Request-Id": {
+        "description": "Correlation id echoed on every response; quote it in support requests.",
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "RateLimit-Remaining": {
+        "description": "Requests left in the current window.",
+        "schema": {
+          "type": "integer"
+        }
+      },
+      "Retry-After": {
+        "description": "Seconds to wait before retrying, sent with every 429.",
+        "schema": {
+          "type": "integer"
+        }
+      }
+    }
+  }
+}

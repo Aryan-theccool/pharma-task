@@ -1,0 +1,220 @@
+# =============================================================================
+# Alert rules expressed against the SLOs in docs/ARCHITECTURE.md:
+#   availability 99.95%, p95 < 200ms reads / < 500ms writes.
+#
+# Each rule pages on *symptoms users feel* (latency, errors, stuck money)
+# rather than on causes (CPU, memory), so the on-call signal stays meaningful.
+# =============================================================================
+groups:
+  - name: amrutam-slo
+    interval: 30s
+    rules:
+      # ------------------------------------------------------------ latency
+      - alert: ReadLatencySLOBreach
+        expr: |
+          histogram_quantile(0.95,
+            sum by (le) (rate(http_request_duration_seconds_bucket{method="GET"}[5m]))
+          ) > 0.2
+        for: 10m
+        labels: { severity: warning, slo: latency }
+        annotations:
+          summary: 'p95 read latency above the 200ms SLO'
+          description: 'p95 GET latency is {{ $value | humanizeDuration }} over the last 5 minutes.'
+          runbook: 'docs/RUNBOOK.md#read-latency'
+
+      - alert: WriteLatencySLOBreach
+        expr: |
+          histogram_quantile(0.95,
+            sum by (le) (rate(http_request_duration_seconds_bucket{method=~"POST|PATCH|PUT|DELETE"}[5m]))
+          ) > 0.5
+        for: 10m
+        labels: { severity: warning, slo: latency }
+        annotations:
+          summary: 'p95 write latency above the 500ms SLO'
+          runbook: 'docs/RUNBOOK.md#write-latency'
+
+      # ------------------------------------------------------- availability
+      - alert: ErrorBudgetBurnFast
+        expr: |
+          (
+            sum(rate(http_requests_total{status=~"5.."}[5m]))
+            / clamp_min(sum(rate(http_requests_total[5m])), 0.001)
+          ) > 0.014
+        for: 5m
+        labels: { severity: critical, slo: availability }
+        annotations:
+          summary: '5xx rate is burning the 99.95% error budget 14x too fast'
+          description: 'At this rate the monthly budget is exhausted in under 2 days.'
+          runbook: 'docs/RUNBOOK.md#elevated-5xx'
+
+      - alert: ServiceDown
+        expr: up{job=~"amrutam-.*"} == 0
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: '{{ $labels.job }} has stopped responding to scrapes'
+
+      # ----------------------------------------------------------- booking
+      - alert: BookingConflictSpike
+        expr: |
+          sum(rate(booking_conflicts_total[5m]))
+          / clamp_min(sum(rate(booking_attempts_total{stage="hold"}[5m])), 0.001) > 0.25
+        for: 10m
+        labels: { severity: warning, domain: booking }
+        annotations:
+          summary: 'More than 25% of booking attempts are conflicting'
+          description: >-
+            Expected under genuine contention for popular slots, but a sustained
+            spike can also mean stale slot caches or a hold-expiry sweep failure.
+          runbook: 'docs/RUNBOOK.md#booking-conflicts'
+
+      - alert: SagaCompensationsElevated
+        expr: sum(rate(saga_compensations_total[15m])) > 0.1
+        for: 15m
+        labels: { severity: critical, domain: booking }
+        annotations:
+          summary: 'Booking sagas are rolling back — money may be moving and reversing'
+          runbook: 'docs/RUNBOOK.md#saga-compensations'
+
+      # ------------------------------------------------------- reliability
+      - alert: OutboxBacklogGrowing
+        expr: outbox_pending_events > 500
+        for: 10m
+        labels: { severity: warning, domain: messaging }
+        annotations:
+          summary: 'Transactional outbox backlog is {{ $value }} events'
+          description: 'Notifications and PDFs are lagging; check the worker and Redis.'
+          runbook: 'docs/RUNBOOK.md#outbox-backlog'
+
+      - alert: QueueDepthGrowing
+        expr: sum by (queue) (queue_depth{state="waiting"}) > 1000
+        for: 10m
+        labels: { severity: warning, domain: messaging }
+        annotations:
+          summary: 'Queue {{ $labels.queue }} has {{ $value }} waiting jobs'
+
+      - alert: CircuitBreakerOpen
+        expr: circuit_breaker_state > 1
+        for: 5m
+        labels: { severity: critical, domain: payments }
+        annotations:
+          summary: 'Circuit breaker {{ $labels.breaker }} is open — downstream is failing'
+          runbook: 'docs/RUNBOOK.md#circuit-breaker'
+
+      # ---------------------------------------------------------- database
+      - alert: ConnectionPoolSaturated
+        expr: db_pool_waiting > 5
+        for: 5m
+        labels: { severity: warning, domain: database }
+        annotations:
+          summary: '{{ $value }} requests are queued waiting for a DB connection'
+          runbook: 'docs/RUNBOOK.md#pool-saturation'
+
+      - alert: TransactionRetriesElevated
+        expr: rate(db_transaction_retries_total[5m]) > 1
+        for: 10m
+        labels: { severity: warning, domain: database }
+        annotations:
+          summary: 'Serialisation failures are forcing frequent transaction retries'
+
+      # ---------------------------------------------------------- security
+      - alert: AuthFailureSpike
+        expr: |
+          sum(rate(auth_events_total{event="login",result="failure"}[5m])) > 10
+        for: 5m
+        labels: { severity: warning, domain: security }
+        annotations:
+          summary: 'Elevated failed logins — possible credential stuffing'
+          runbook: 'docs/RUNBOOK.md#auth-failure-spike'
+
+      - alert: IdempotencyConflictsElevated
+        expr: sum(rate(idempotency_events_total{outcome="conflict"}[5m])) > 1
+        for: 10m
+        labels: { severity: warning, domain: correctness }
+        annotations:
+          summary: 'Clients are reusing idempotency keys with different payloads'
+          description: 'Usually a client bug: a retry is mutating its payload between attempts.'
+
+      # The limiter fails open on a Redis outage: the platform stays up, but
+      # brute-force and scraping protection is gone while it lasts. That is an
+      # accepted trade-off only for as long as somebody knows it is happening —
+      # so this pages rather than warns. `rate_limit_enforcing` is seeded to 1
+      # at boot, so a fresh process cannot look like an outage.
+      - alert: RateLimiterFailingOpen
+        expr: min(rate_limit_enforcing) == 0
+        for: 1m
+        labels: { severity: critical, domain: security }
+        annotations:
+          summary: 'Rate limiter is FAILING OPEN — requests are not being throttled'
+          description: >-
+            The limiter cannot reach Redis and is allowing every request through.
+            Auth endpoints are unprotected against credential stuffing until this
+            clears. Check Redis health first; the WAF is the only remaining
+            backstop.
+          runbook: 'docs/RUNBOOK.md#rate-limiter-failing-open'
+
+      - alert: RateLimiterFailOpenBurst
+        expr: sum(rate(rate_limit_fail_open_total[5m])) > 1
+        for: 2m
+        labels: { severity: warning, domain: security }
+        annotations:
+          summary: 'Requests are bypassing the rate limiter'
+          description: >-
+            Sustained fail-open events. Even if `rate_limit_enforcing` is
+            flapping back to 1, the limiter is unreliable and throttling cannot
+            be depended on.
+
+      # -------------------------------------------------- clinical integrity
+      # Any non-zero value here means clinical data was changed by something
+      # other than the application. There is no "acceptable rate" of this, so
+      # the threshold is > 0 and the wait is short — an attacker with database
+      # access is an active incident, not a trend to watch.
+      - alert: ClinicalIntegrityViolation
+        expr: max(clinical_integrity_findings) > 0
+        for: 1m
+        labels: { severity: critical, domain: security, page: immediate }
+        annotations:
+          summary: 'Clinical data was modified outside the application ({{ $labels.kind }})'
+          description: >-
+            GET /api/v1/admin/integrity/verify names the affected rows, the
+            database user and the client address. Treat as a confirmed breach
+            until proven otherwise.
+          runbook: 'docs/RUNBOOK.md#clinical-integrity-violation'
+
+      # The sweep going quiet is itself a finding: an attacker who can stop the
+      # detector gets an unmonitored window. Alerts if no sweep completes for
+      # 20 minutes (the schedule is every 5).
+      - alert: ClinicalIntegritySweepStalled
+        expr: time() - clinical_integrity_last_run_timestamp_seconds > 1200
+        for: 5m
+        labels: { severity: critical, domain: security }
+        annotations:
+          summary: 'Clinical integrity sweep has not completed in over 20 minutes'
+          description: 'Tamper detection is not running. Clinical writes are currently unverified.'
+          runbook: 'docs/RUNBOOK.md#clinical-integrity-violation'
+
+      # ------------------------------------------------------- saga recovery
+      - alert: SagasStuck
+        expr: sum(saga_stuck_instances) > 0
+        for: 10m
+        labels: { severity: warning, domain: correctness }
+        annotations:
+          summary: '{{ $value }} saga(s) have been mid-flight for longer than the stuck threshold'
+          description: >-
+            The reconciler runs every minute; sagas still stuck after ten
+            suggest recovery is failing rather than merely pending.
+          runbook: 'docs/RUNBOOK.md#stuck-sagas'
+
+      # A dead letter is money or inventory in an indeterminate state. It will
+      # not resolve itself — the reconciler has already given up.
+      - alert: SagaDeadLettered
+        expr: saga_dead_lettered_instances > 0
+        for: 1m
+        labels: { severity: critical, domain: correctness }
+        annotations:
+          summary: '{{ $value }} saga(s) need manual intervention'
+          description: >-
+            GET /api/v1/admin/integrity/saga-dead-letters lists them. Each one
+            may be a patient charged without a booking, or a slot held with no
+            consultation.
+          runbook: 'docs/RUNBOOK.md#stuck-sagas'

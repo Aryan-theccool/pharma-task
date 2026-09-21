@@ -1,0 +1,139 @@
+# =============================================================================
+# Local development stack: API + worker + Postgres + Redis, plus an optional
+# observability profile (Prometheus, Grafana, Jaeger).
+#
+#   docker compose up -d                  # api, worker, postgres, redis
+#   docker compose --profile obs up -d    # + prometheus, grafana, jaeger
+#
+# The API and the worker are the *same image* running different commands —
+# exactly how they are deployed to ECS, so local behaviour matches production.
+# =============================================================================
+
+name: amrutam
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: amrutam
+      POSTGRES_PASSWORD: amrutam
+      POSTGRES_DB: amrutam
+      # Deterministic collation so index ordering matches production.
+      POSTGRES_INITDB_ARGS: '--locale=C --encoding=UTF8'
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U amrutam -d amrutam']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    command:
+      - postgres
+      - -c
+      - max_connections=200
+      - -c
+      - shared_buffers=256MB
+      - -c
+      - log_min_duration_statement=500 # surface slow queries in dev
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - '6379:6379'
+    command: ['redis-server', '--appendonly', 'yes', '--maxmemory-policy', 'noeviction']
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  migrate:
+    build:
+      context: .
+      target: build
+    env_file: [.env.docker]
+    depends_on:
+      postgres: { condition: service_healthy }
+    # One-shot: applies migrations then seeds demo data.
+    command: sh -c "npx ts-node scripts/migrate.ts && npx ts-node scripts/seed.ts"
+    restart: 'no'
+
+  api:
+    build:
+      context: .
+      target: runtime
+    env_file: [.env.docker]
+    environment:
+      RUN_WORKERS_IN_API: 'false' # the worker service owns the queues
+    ports:
+      - '3000:3000'
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }
+    volumes:
+      - prescription-storage:/app/storage
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits: { cpus: '1.0', memory: 1G }
+
+  worker:
+    build:
+      context: .
+      target: runtime
+    env_file: [.env.docker]
+    command: ['node', 'dist/src/worker.js']
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }
+    volumes:
+      - prescription-storage:/app/storage
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits: { cpus: '0.5', memory: 512M }
+
+  # ------------------------------------------------------------ observability
+  prometheus:
+    profiles: ['obs']
+    image: prom/prometheus:v2.54.1
+    ports: ['9090:9090']
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./observability/alerts.yml:/etc/prometheus/alerts.yml:ro
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.retention.time=7d'
+
+  grafana:
+    profiles: ['obs']
+    image: grafana/grafana:11.2.0
+    ports: ['3001:3000']
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: 'true'
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on: [prometheus]
+
+  jaeger:
+    profiles: ['obs']
+    image: jaegertracing/all-in-one:1.60
+    ports:
+      - '16686:16686' # UI
+      - '4318:4318' # OTLP/HTTP
+    environment:
+      COLLECTOR_OTLP_ENABLED: 'true'
+
+volumes:
+  postgres-data:
+  redis-data:
+  prescription-storage:
